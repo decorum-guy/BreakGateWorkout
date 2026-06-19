@@ -1070,31 +1070,16 @@ private enum StatisticsShareService {
     private static func renderPNGExport(snapshot: StatisticsShareSnapshot) -> StatisticsPNGExport? {
         let view = StatisticsShareCard(snapshot: snapshot)
             .frame(width: imageSize.width, height: imageSize.height)
-        let hostingView = NSHostingView(rootView: view)
-        hostingView.frame = CGRect(origin: .zero, size: imageSize)
-        hostingView.layoutSubtreeIfNeeded()
 
-        let pixelWidth = Int(imageSize.width * exportScale)
-        let pixelHeight = Int(imageSize.height * exportScale)
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: pixelWidth,
-            pixelsHigh: pixelHeight,
-            bitsPerSample: 8,
-            samplesPerPixel: 3,
-            hasAlpha: false,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            return nil
-        }
+        let renderer = ImageRenderer(content: view)
+        renderer.proposedSize = ProposedViewSize(imageSize)
+        renderer.scale = exportScale
+        renderer.colorMode = .nonLinear
 
-        rep.size = imageSize
-        hostingView.cacheDisplay(in: hostingView.bounds, to: rep)
+        guard let cgImage = renderer.cgImage else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cgImage)
         guard let data = rep.representation(using: .png, properties: [:]) else { return nil }
-        return StatisticsPNGExport(data: data, pixelSize: CGSize(width: pixelWidth, height: pixelHeight))
+        return StatisticsPNGExport(data: data, pixelSize: CGSize(width: cgImage.width, height: cgImage.height))
     }
 
     private static func showSharePicker(export: StatisticsPNGExport, language: AppLanguage) {
