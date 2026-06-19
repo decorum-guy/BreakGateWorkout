@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSAppClip</key>
 	<dict>
 		<key>NSAppClipRequestEphemeralUserNotification</key>
@@ -13,5 +15,9 @@
 	<string>Camera is used to count exercises locally for BreakGate.</string>
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone is used for optional voice commands while the BreakGate workout gate is open.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition is used for optional local workout voice commands like changing exercises.</string>
 </dict>
 </plist>

@@ -1,0 +1,12 @@
+{
+  "data" : [
+    {
+      "filename" : "gate_start.caf",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
