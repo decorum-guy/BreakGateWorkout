@@ -26,20 +26,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             AppBackground()
-
-            VStack(alignment: .leading, spacing: 24) {
-                HeaderView(language: settings.appLanguage)
-
-                HStack(alignment: .top, spacing: 22) {
-                    CameraStageView(camera: camera, monitor: monitor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    CameraControlPanel(camera: camera)
-                        .frame(width: 340)
-                }
-            }
-            .padding(28)
-            .padding(.top, 112)
+            GateScreenLayout(camera: camera, monitor: monitor, language: settings.appLanguage)
         }
         .frame(minWidth: 980, minHeight: 680)
         .preferredColorScheme(.dark)
@@ -83,6 +70,7 @@ struct ContentView: View {
             }
         }
     }
+
 }
 
 private struct AppBackground: View {
@@ -118,6 +106,40 @@ private struct HeaderView: View {
 
             Spacer()
         }
+    }
+}
+
+private struct GateScreenLayout: View {
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var monitor: BreakGateMonitor
+    let language: AppLanguage
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 28) {
+                HeaderView(language: language)
+                mainArea
+            }
+            .padding(.horizontal, 36)
+            .padding(.top, gateTopInset(for: geometry.size.height))
+            .padding(.bottom, 32)
+        }
+    }
+
+    private var mainArea: some View {
+        HStack(alignment: .center, spacing: 22) {
+            CameraStageView(camera: camera, monitor: monitor)
+                .frame(maxWidth: .infinity)
+
+            CameraControlPanel(camera: camera)
+                .frame(width: 340)
+                .frame(maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func gateTopInset(for height: CGFloat) -> CGFloat {
+        max(CGFloat(64), min(CGFloat(86), height * CGFloat(0.062)))
     }
 }
 
@@ -804,120 +826,120 @@ private struct CameraControlPanel: View {
     @ObservedObject var camera: CameraModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(camera.appLanguage == .russian ? "Камера" : "Camera")
-                    .font(.title3.weight(.semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(camera.appLanguage == .russian ? "Камера" : "Camera")
+                        .font(.title3.weight(.semibold))
 
-                HStack(spacing: 8) {
-                    CameraModePill(
-                        title: camera.appLanguage == .russian ? "Mac" : "Mac",
-                        systemImage: "display",
-                        isSelected: camera.session != nil && !camera.selectedDeviceIsIPhone,
-                        isEnabled: camera.hasMacCamera
-                    ) {
-                        camera.selectMacCamera()
-                    }
+                    HStack(spacing: 8) {
+                        CameraModePill(
+                            title: camera.appLanguage == .russian ? "Mac" : "Mac",
+                            systemImage: "display",
+                            isSelected: camera.session != nil && !camera.selectedDeviceIsIPhone,
+                            isEnabled: camera.hasMacCamera
+                        ) {
+                            camera.selectMacCamera()
+                        }
 
-                    CameraModePill(
-                        title: "iPhone",
-                        systemImage: "iphone",
-                        isSelected: camera.selectedDeviceIsIPhone,
-                        isEnabled: camera.hasIPhoneCamera
-                    ) {
-                        camera.selectIPhoneCamera()
-                    }
+                        CameraModePill(
+                            title: "iPhone",
+                            systemImage: "iphone",
+                            isSelected: camera.selectedDeviceIsIPhone,
+                            isEnabled: camera.hasIPhoneCamera
+                        ) {
+                            camera.selectIPhoneCamera()
+                        }
 
-                    Button {
-                        camera.refreshCameraDevices()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.callout.weight(.semibold))
-                            .frame(width: 36, height: 36)
-                            .background(Color.white.opacity(0.07), in: Circle())
-                            .overlay {
-                                Circle()
-                                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-                            }
+                        Button {
+                            camera.refreshCameraDevices()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.callout.weight(.semibold))
+                                .frame(width: 36, height: 36)
+                                .background(Color.white.opacity(0.07), in: Circle())
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help(camera.appLanguage == .russian ? "Обновить камеры" : "Refresh cameras")
                     }
-                    .buttonStyle(.plain)
-                    .help(camera.appLanguage == .russian ? "Обновить камеры" : "Refresh cameras")
                 }
-            }
 
-            ZoomControlPanel(camera: camera)
+                ZoomControlPanel(camera: camera)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(camera.appLanguage == .russian ? "Тренировка" : "Workout")
-                    .font(.headline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(camera.appLanguage == .russian ? "Тренировка" : "Workout")
+                        .font(.headline.weight(.semibold))
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("\(L.t(.difficulty, camera.appLanguage)): \(camera.currentDifficultyTitle)")
-                    Text(camera.currentStepLabel)
-                    Text(camera.currentProgressSummary)
-                    Text(camera.currentRemainingSummary)
-                        .foregroundStyle(.secondary)
-                    if let nextStepPreview = camera.nextStepPreview {
-                        Text("\(camera.appLanguage == .russian ? "Дальше" : "Next"): \(nextStepPreview)")
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("\(L.t(.difficulty, camera.appLanguage)): \(camera.currentDifficultyTitle)")
+                        Text(camera.currentStepLabel)
+                        Text(camera.currentProgressSummary)
+                        Text(camera.currentRemainingSummary)
+                            .foregroundStyle(.secondary)
+                        if let nextStepPreview = camera.nextStepPreview {
+                            Text("\(camera.appLanguage == .russian ? "Дальше" : "Next"): \(nextStepPreview)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption.weight(.medium))
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Picker(L.t(.difficulty, camera.appLanguage), selection: Binding(
+                        get: { camera.activeWorkoutPlan.difficulty },
+                        set: { camera.selectDifficulty($0) }
+                    )) {
+                        ForEach(WorkoutDifficulty.allCases) { difficulty in
+                            Text(difficulty.title(camera.appLanguage)).tag(difficulty)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!camera.canChangeDifficulty)
+
+                    if !camera.canChangeDifficulty {
+                        Text(camera.appLanguage == .russian ? "Сложность блокируется после первого прогресса." : "Difficulty locks after first progress.")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                }
-                .font(.caption.weight(.medium))
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                Picker(L.t(.difficulty, camera.appLanguage), selection: Binding(
-                    get: { camera.activeWorkoutPlan.difficulty },
-                    set: { camera.selectDifficulty($0) }
-                )) {
-                    ForEach(WorkoutDifficulty.allCases) { difficulty in
-                        Text(difficulty.title(camera.appLanguage)).tag(difficulty)
+                    VStack(alignment: .leading, spacing: 8) {
+                        exerciseGrid(modes: regularExerciseModes)
+
+                        if !experimentalExerciseModes.isEmpty {
+                            Text(camera.appLanguage == .russian ? "Экспериментальные упражнения" : "Experimental")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 4)
+
+                            exerciseGrid(modes: experimentalExerciseModes)
+                        }
                     }
                 }
-                .pickerStyle(.menu)
-                .disabled(!camera.canChangeDifficulty)
 
-                if !camera.canChangeDifficulty {
-                    Text(camera.appLanguage == .russian ? "Сложность блокируется после первого прогресса." : "Difficulty locks after first progress.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                StatusStack(camera: camera)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    exerciseGrid(modes: regularExerciseModes)
+                Divider()
+                    .overlay(Color.white.opacity(0.10))
 
-                    if !experimentalExerciseModes.isEmpty {
-                        Text(camera.appLanguage == .russian ? "Экспериментальные упражнения" : "Experimental")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
+                Toggle(camera.appLanguage == .russian ? "Debug-панель" : "Debug Panel", isOn: Binding(
+                    get: { camera.showDebugPanel },
+                    set: { camera.setDebugPanelVisible($0) }
+                ))
+                .toggleStyle(.switch)
+                .font(.footnote.weight(.medium))
 
-                        exerciseGrid(modes: experimentalExerciseModes)
-                    }
-                }
-            }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(camera.appLanguage == .russian ? "Устройства" : "Devices")
+                        .font(.headline.weight(.semibold))
 
-            StatusStack(camera: camera)
-
-            Divider()
-                .overlay(Color.white.opacity(0.10))
-
-            Toggle(camera.appLanguage == .russian ? "Debug-панель" : "Debug Panel", isOn: Binding(
-                get: { camera.showDebugPanel },
-                set: { camera.setDebugPanelVisible($0) }
-            ))
-            .toggleStyle(.switch)
-            .font(.footnote.weight(.medium))
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text(camera.appLanguage == .russian ? "Устройства" : "Devices")
-                    .font(.headline.weight(.semibold))
-
-                if camera.devices.isEmpty {
-                    EmptyDeviceCard(language: camera.appLanguage)
-                } else {
-                    ScrollView {
+                    if camera.devices.isEmpty {
+                        EmptyDeviceCard(language: camera.appLanguage)
+                    } else {
                         VStack(spacing: 10) {
                             ForEach(camera.devices) { device in
                                 DeviceCard(
@@ -931,14 +953,11 @@ private struct CameraControlPanel: View {
                         }
                         .padding(.vertical, 2)
                     }
-                    .frame(minHeight: 150, maxHeight: 260)
-                    .scrollIndicators(.hidden)
                 }
             }
-
-            Spacer()
+            .padding(18)
         }
-        .padding(18)
+        .scrollIndicators(.hidden)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
