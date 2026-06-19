@@ -884,15 +884,16 @@ private struct CameraControlPanel: View {
                         .foregroundStyle(.secondary)
                 }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
-                    ForEach(camera.availableExerciseModes) { mode in
-                        ExerciseModeButton(
-                            mode: mode,
-                            isSelected: camera.selectedMode == mode,
-                            language: camera.appLanguage
-                        ) {
-                            camera.selectExerciseMode(mode)
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    exerciseGrid(modes: regularExerciseModes)
+
+                    if !experimentalExerciseModes.isEmpty {
+                        Text(camera.appLanguage == .russian ? "Экспериментальные упражнения" : "Experimental")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+
+                        exerciseGrid(modes: experimentalExerciseModes)
                     }
                 }
             }
@@ -942,6 +943,29 @@ private struct CameraControlPanel: View {
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+        }
+    }
+
+    private var regularExerciseModes: [ExerciseMode] {
+        camera.availableExerciseModes.filter { !$0.isExperimental }
+    }
+
+    private var experimentalExerciseModes: [ExerciseMode] {
+        camera.availableExerciseModes.filter { $0.isExperimental }
+    }
+
+    @ViewBuilder
+    private func exerciseGrid(modes: [ExerciseMode]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
+            ForEach(modes) { mode in
+                ExerciseModeButton(
+                    mode: mode,
+                    isSelected: camera.selectedMode == mode,
+                    language: camera.appLanguage
+                ) {
+                    camera.selectExerciseMode(mode)
+                }
+            }
         }
     }
 }
@@ -2575,6 +2599,7 @@ final class CameraModel: ObservableObject {
             }
         }
     }
+
 }
 
 private final class CameraSessionController: @unchecked Sendable {

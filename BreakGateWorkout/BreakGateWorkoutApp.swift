@@ -909,9 +909,17 @@ private struct StatisticsShareSnapshot {
     let lastWorkoutDescription: String
 }
 
+private struct StatisticsPNGExport {
+    let data: Data
+    let pixelSize: CGSize
+}
+
 @MainActor
 private enum StatisticsShareService {
     private static let imageSize = CGSize(width: 900, height: 1180)
+    private static let exportScale: CGFloat = 4
+    private static var shareAnchorWindow: NSWindow?
+    private static var temporaryShareURLs: [URL] = []
 
     static func presentShareOptions(stats: WorkoutStats, settings: WorkoutSettingsStore) {
         let language = settings.appLanguage
@@ -930,88 +938,152 @@ private enum StatisticsShareService {
             lastWorkoutDescription: stats.lastWorkoutDescription(language)
         )
 
-        guard let image = renderImage(snapshot: snapshot) else {
-            NSSound.beep()
+        guard let export = renderPNGExport(snapshot: snapshot) else {
+            showError(title: language == .russian ? "Не удалось экспортировать изображение" : "Could not export image", language: language)
             return
         }
 
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = language == .russian ? "Поделиться статистикой" : "Share statistics"
         alert.informativeText = language == .russian ? "Что сделать с красивой PNG-карточкой?" : "What should we do with the PNG stats card?"
         alert.addButton(withTitle: language == .russian ? "Поделиться..." : "Share...")
-        alert.addButton(withTitle: language == .russian ? "Сохранить..." : "Save...")
+        alert.addButton(withTitle: language == .russian ? "Сохранить статистику" : "Save Statistics")
         alert.addButton(withTitle: language == .russian ? "Скопировать" : "Copy Image")
         alert.addButton(withTitle: language == .russian ? "Отмена" : "Cancel")
 
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            showSharePicker(image: image)
+            showSharePicker(export: export, language: language)
         case .alertSecondButtonReturn:
-            save(image: image, language: language)
+            save(export: export, language: language)
         case .alertThirdButtonReturn:
-            copy(image: image)
+            copy(export: export, language: language)
         default:
             break
         }
     }
 
-    private static func renderImage(snapshot: StatisticsShareSnapshot) -> NSImage? {
+    private static func renderPNGExport(snapshot: StatisticsShareSnapshot) -> StatisticsPNGExport? {
         let view = StatisticsShareCard(snapshot: snapshot)
             .frame(width: imageSize.width, height: imageSize.height)
         let hostingView = NSHostingView(rootView: view)
         hostingView.frame = CGRect(origin: .zero, size: imageSize)
         hostingView.layoutSubtreeIfNeeded()
 
-        guard let rep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
+        let pixelWidth = Int(imageSize.width * exportScale)
+        let pixelHeight = Int(imageSize.height * exportScale)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelWidth,
+            pixelsHigh: pixelHeight,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
             return nil
         }
 
+        rep.size = imageSize
         hostingView.cacheDisplay(in: hostingView.bounds, to: rep)
-        let image = NSImage(size: imageSize)
-        image.addRepresentation(rep)
-        return image
+        guard let data = rep.representation(using: .png, properties: [:]) else { return nil }
+        return StatisticsPNGExport(data: data, pixelSize: CGSize(width: pixelWidth, height: pixelHeight))
     }
 
-    private static func showSharePicker(image: NSImage) {
-        guard let contentView = NSApp.keyWindow?.contentView else {
-            copy(image: image)
-            return
+    private static func showSharePicker(export: StatisticsPNGExport, language: AppLanguage) {
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("BreakGateWorkout-stats-\(UUID().uuidString)")
+                .appendingPathExtension("png")
+            try export.data.write(to: url, options: .atomic)
+            temporaryShareURLs.append(url)
+
+            NSApp.activate(ignoringOtherApps: true)
+            let anchorWindow = makeShareAnchorWindow()
+            guard let contentView = anchorWindow.contentView else {
+                showError(title: language == .russian ? "Не удалось экспортировать изображение" : "Could not export image", language: language)
+                return
+            }
+
+            let picker = NSSharingServicePicker(items: [url])
+            picker.show(relativeTo: contentView.bounds, of: contentView, preferredEdge: .minY)
+
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(90))
+                shareAnchorWindow?.orderOut(nil)
+                shareAnchorWindow = nil
+                temporaryShareURLs.removeAll { $0 == url }
+                try? FileManager.default.removeItem(at: url)
+            }
+        } catch {
+            showError(title: language == .russian ? "Не удалось экспортировать изображение" : "Could not export image", message: error.localizedDescription, language: language)
         }
-
-        let picker = NSSharingServicePicker(items: [image])
-        picker.show(relativeTo: contentView.bounds, of: contentView, preferredEdge: .minY)
     }
 
-    private static func save(image: NSImage, language: AppLanguage) {
+    private static func save(export: StatisticsPNGExport, language: AppLanguage) {
+        NSApp.activate(ignoringOtherApps: true)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
         panel.nameFieldStringValue = "BreakGateWorkout-stats.png"
         panel.title = language == .russian ? "Сохранить статистику" : "Save Statistics"
 
-        guard panel.runModal() == .OK, let url = panel.url, let data = pngData(from: image) else {
+        guard panel.runModal() == .OK, let url = panel.url else {
             return
         }
 
         do {
-            try data.write(to: url)
+            try export.data.write(to: url, options: .atomic)
         } catch {
-            NSSound.beep()
+            showError(title: language == .russian ? "Не удалось сохранить файл" : "Could not save file", message: error.localizedDescription, language: language)
         }
     }
 
-    private static func copy(image: NSImage) {
+    private static func copy(export: StatisticsPNGExport, language: AppLanguage) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([image])
+        pasteboard.declareTypes([.png], owner: nil)
+        guard pasteboard.setData(export.data, forType: .png) else {
+            showError(title: language == .russian ? "Не удалось экспортировать изображение" : "Could not export image", language: language)
+            return
+        }
     }
 
-    private static func pngData(from image: NSImage) -> Data? {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData) else {
-            return nil
+    private static func makeShareAnchorWindow() -> NSWindow {
+        if let shareAnchorWindow {
+            shareAnchorWindow.makeKeyAndOrderFront(nil)
+            return shareAnchorWindow
         }
 
-        return bitmap.representation(using: .png, properties: [:])
+        let screenFrame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1, height: 1)
+        let anchorWindow = NSWindow(
+            contentRect: NSRect(x: screenFrame.midX, y: screenFrame.midY, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        anchorWindow.isOpaque = false
+        anchorWindow.backgroundColor = .clear
+        anchorWindow.level = .floating
+        anchorWindow.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        anchorWindow.orderFrontRegardless()
+        shareAnchorWindow = anchorWindow
+        return anchorWindow
+    }
+
+    private static func showError(title: String, message: String? = nil, language: AppLanguage) {
+        NSSound.beep()
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message ?? (language == .russian ? "Попробуй еще раз." : "Please try again.")
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 
@@ -1061,7 +1133,7 @@ private struct StatisticsShareCard: View {
                     )
                 }
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 18) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], spacing: 18) {
                     ShareStatTile(mode: .pushUps, value: snapshot.totalPushUps, subtitle: L.t(.totalReps, language), color: .green, language: language)
                     ShareStatTile(mode: .squats, value: snapshot.totalSquats, subtitle: L.t(.totalReps, language), color: .orange, language: language)
                     ShareStatTile(mode: .abs, value: snapshot.totalSitUps, subtitle: L.t(.totalReps, language), color: .purple, language: language)
@@ -1099,11 +1171,11 @@ private struct ShareHeroMetric: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
             Text(subtitle)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.58))
         }
         .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 164, alignment: .leading)
         .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1130,11 +1202,11 @@ private struct ShareStatTile: View {
                 .font(.system(size: 44, weight: .black, design: .rounded))
                 .monospacedDigit()
             Text(subtitle)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.58))
         }
         .padding(22)
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 158, maxHeight: 158, alignment: .leading)
         .background(Color.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
