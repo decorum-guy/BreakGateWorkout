@@ -2770,6 +2770,10 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private let squatKneeStraightThreshold: CGFloat = 155
     private let absContractedThreshold: CGFloat = 55
     private let absExtendedThreshold: CGFloat = 105
+    private let absLooseContractedThreshold: CGFloat = 68
+    private let absLooseExtendedThreshold: CGFloat = 96
+    private let absContractedShoulderKneeRatio: CGFloat = 1.18
+    private let absExtendedShoulderKneeRatio: CGFloat = 1.42
     private let plankStraightThreshold: CGFloat = 145
     private let mountainClimberPlankThreshold: CGFloat = 124
     private let burpeeStandingThreshold: CGFloat = 150
@@ -2990,16 +2994,8 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
 
             return kneeAngle >= squatKneeStraightThreshold
         case .abs:
-            guard let torsoAngle = bestAngle(
-                points: points,
-                firstCandidates: [.leftShoulder, .rightShoulder],
-                middleCandidates: [.leftHip, .rightHip],
-                lastCandidates: [.leftKnee, .rightKnee]
-            ) else {
-                return false
-            }
-
-            return torsoAngle >= absExtendedThreshold
+            guard let metrics = absMetrics(points: points) else { return false }
+            return metrics.isExtended
         }
     }
 
@@ -3024,14 +3020,16 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
 
             return PoseStateResult(state: updateSquatState(kneeAngle: kneeAngle) ? .activeExercise : .tracking, debugState: squatPosition == .down ? "squat down" : "squat up")
         case .abs:
-            guard let torsoAngle = bestAngle(
-                points: points,
-                firstCandidates: [.leftShoulder, .rightShoulder],
-                middleCandidates: [.leftHip, .rightHip],
-                lastCandidates: [.leftKnee, .rightKnee]
-            ) else { return PoseStateResult(state: .tracking, debugState: "abs tracking") }
+            guard let metrics = absMetrics(points: points) else {
+                return PoseStateResult(state: .tracking, debugState: "abs tracking")
+            }
 
-            return PoseStateResult(state: updateAbsState(torsoAngle: torsoAngle) ? .activeExercise : .tracking, debugState: absPosition == .down ? "abs contracted" : "abs extended")
+            let counted = updateAbsState(metrics: metrics)
+            let phase = absPosition == .down ? "abs contracted" : "abs extended"
+            return PoseStateResult(
+                state: counted ? .activeExercise : .tracking,
+                debugState: "\(phase) angle \(Int(metrics.torsoAngle.rounded())) ratio \(String(format: "%.2f", metrics.shoulderToKneeRatio))"
+            )
         case .plank:
             let isValid = isPlankFormValid(points: points)
             return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "plank active" : "plank broken")
@@ -3085,13 +3083,13 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         return false
     }
 
-    private func updateAbsState(torsoAngle: CGFloat) -> Bool {
-        if torsoAngle <= absContractedThreshold {
+    private func updateAbsState(metrics: AbsMetrics) -> Bool {
+        if metrics.isContracted {
             absPosition = .down
             return false
         }
 
-        if torsoAngle >= absExtendedThreshold {
+        if metrics.isExtended {
             if absPosition == .down {
                 repCount += 1
                 absPosition = .up
@@ -3102,6 +3100,32 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         }
 
         return false
+    }
+
+    private func absMetrics(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> AbsMetrics? {
+        guard let torsoAngle = bestAngle(
+            points: points,
+            firstCandidates: [.leftShoulder, .rightShoulder],
+            middleCandidates: [.leftHip, .rightHip],
+            lastCandidates: [.leftKnee, .rightKnee]
+        ), let shoulderCenter = averagePoint(points: points, joints: [.leftShoulder, .rightShoulder]),
+           let hipCenter = averagePoint(points: points, joints: [.leftHip, .rightHip]),
+           let kneeCenter = averagePoint(points: points, joints: [.leftKnee, .rightKnee]) else {
+            return nil
+        }
+
+        let hipToKnee = max(0.01, distance(hipCenter, kneeCenter))
+        let shoulderToKneeRatio = distance(shoulderCenter, kneeCenter) / hipToKnee
+        return AbsMetrics(
+            torsoAngle: torsoAngle,
+            shoulderToKneeRatio: shoulderToKneeRatio,
+            contractedAngle: absContractedThreshold,
+            looseContractedAngle: absLooseContractedThreshold,
+            extendedAngle: absExtendedThreshold,
+            looseExtendedAngle: absLooseExtendedThreshold,
+            contractedRatio: absContractedShoulderKneeRatio,
+            extendedRatio: absExtendedShoulderKneeRatio
+        )
     }
 
     private func isPlankFormValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
@@ -3360,6 +3384,15 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         return values.reduce(0, +) / CGFloat(values.count)
     }
 
+    private func averagePoint(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], joints: [VNHumanBodyPoseObservation.JointName]) -> CGPoint? {
+        let values = joints.compactMap { validPoint(points[$0]) }
+        guard !values.isEmpty else { return nil }
+        let total = values.reduce(CGPoint.zero) { partial, point in
+            CGPoint(x: partial.x + point.x, y: partial.y + point.y)
+        }
+        return CGPoint(x: total.x / CGFloat(values.count), y: total.y / CGFloat(values.count))
+    }
+
     private func bestAngle(
         points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint],
         firstCandidates: [VNHumanBodyPoseObservation.JointName],
@@ -3453,6 +3486,27 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             )
         )
         resetDiagnosticsCounters()
+    }
+}
+
+private struct AbsMetrics {
+    let torsoAngle: CGFloat
+    let shoulderToKneeRatio: CGFloat
+    let contractedAngle: CGFloat
+    let looseContractedAngle: CGFloat
+    let extendedAngle: CGFloat
+    let looseExtendedAngle: CGFloat
+    let contractedRatio: CGFloat
+    let extendedRatio: CGFloat
+
+    var isContracted: Bool {
+        torsoAngle <= contractedAngle
+            || (torsoAngle <= looseContractedAngle && shoulderToKneeRatio <= contractedRatio)
+    }
+
+    var isExtended: Bool {
+        torsoAngle >= extendedAngle
+            || (torsoAngle >= looseExtendedAngle && shoulderToKneeRatio >= extendedRatio)
     }
 }
 
