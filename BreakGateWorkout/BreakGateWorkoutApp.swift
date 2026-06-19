@@ -1137,7 +1137,7 @@ private struct StatisticsShareCard: View {
                     ShareStatTile(mode: .pushUps, value: snapshot.totalPushUps, subtitle: L.t(.totalReps, language), color: .green, language: language)
                     ShareStatTile(mode: .squats, value: snapshot.totalSquats, subtitle: L.t(.totalReps, language), color: .orange, language: language)
                     ShareStatTile(mode: .abs, value: snapshot.totalSitUps, subtitle: L.t(.totalReps, language), color: .purple, language: language)
-                    ShareStatTile(mode: .plank, value: snapshot.totalPlankSeconds, subtitle: L.t(.seconds, language), color: .cyan, language: language)
+                    ShareStatTile(mode: .plank, value: snapshot.totalPlankSeconds, subtitle: totalSecondsSubtitle, color: .cyan, language: language)
                     ShareStatTile(mode: .burpees, value: snapshot.totalBurpees, subtitle: L.t(.totalReps, language), color: .pink, language: language)
                     ShareStatTile(mode: .mountainClimbers, value: snapshot.totalMountainClimbers, subtitle: L.t(.totalReps, language), color: .mint, language: language)
                 }
@@ -1151,6 +1151,10 @@ private struct StatisticsShareCard: View {
             .padding(54)
         }
         .foregroundStyle(.white)
+    }
+
+    private var totalSecondsSubtitle: String {
+        language == .russian ? "всего секунд" : "total seconds"
     }
 }
 
@@ -1171,8 +1175,9 @@ private struct ShareHeroMetric: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
             Text(subtitle)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.58))
+                .frame(height: 24, alignment: .leading)
         }
         .padding(24)
         .frame(maxWidth: .infinity, minHeight: 164, alignment: .leading)
@@ -1202,8 +1207,9 @@ private struct ShareStatTile: View {
                 .font(.system(size: 44, weight: .black, design: .rounded))
                 .monospacedDigit()
             Text(subtitle)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.58))
+                .frame(height: 23, alignment: .leading)
         }
         .padding(22)
         .frame(maxWidth: .infinity, minHeight: 158, maxHeight: 158, alignment: .leading)
