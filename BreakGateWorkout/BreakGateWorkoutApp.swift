@@ -124,79 +124,182 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct BreakGateWorkoutApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var monitor = BreakGateMonitor()
-    @StateObject private var stats = WorkoutStats()
-    @StateObject private var settings = WorkoutSettingsStore()
+    @StateObject private var runtime = AppRuntime()
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarControlView(monitor: monitor, stats: stats, settings: settings)
+            MenuBarControlView(monitor: runtime.monitor, stats: runtime.stats, settings: runtime.settings)
         } label: {
-            MenuBarStatusLabel(monitor: monitor, stats: stats, settings: settings)
+            MenuBarStatusLabel(state: runtime.statusIconState)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-private struct MenuBarStatusLabel: View {
-    @ObservedObject var monitor: BreakGateMonitor
-    @ObservedObject var stats: WorkoutStats
-    @ObservedObject var settings: WorkoutSettingsStore
+@MainActor
+final class AppRuntime: ObservableObject {
+    enum StatusIconState: Equatable {
+        case idle
+        case active
+    }
 
-    var body: some View {
-        Image(systemName: monitor.gateActive ? "figure.strengthtraining.traditional" : "figure.run")
-            .symbolRenderingMode(.hierarchical)
-            .onAppear {
-                DiagnosticLog.log("menu bar status appeared; starting idle monitor")
-                monitor.start()
-                monitor.setScoringSensitivity(settings.scoringSensitivity)
-                monitor.setGateWarningSettings(
-                    delay: settings.gateWarningDelay,
-                    secondaryReminder: settings.secondaryGateReminder,
-                    language: settings.appLanguage
-                )
-            }
-            .onChange(of: monitor.gateActive) { _, isActive in
+    let monitor = BreakGateMonitor()
+    let stats = WorkoutStats()
+    let settings = WorkoutSettingsStore()
+
+    @Published private(set) var statusIconState: StatusIconState = .idle
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    init() {
+        DiagnosticLog.log("AppRuntime started")
+        startMonitor()
+        subscribeToGateState()
+        subscribeToSettings()
+    }
+
+    private func startMonitor() {
+        monitor.start()
+        DiagnosticLog.log("monitor started")
+        monitor.setScoringSensitivity(settings.scoringSensitivity)
+        applyGateWarningSettings(
+            delay: settings.gateWarningDelay,
+            secondaryReminder: settings.secondaryGateReminder,
+            language: settings.appLanguage
+        )
+    }
+
+    private func subscribeToGateState() {
+        monitor.$gateActive
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] isActive in
                 Task { @MainActor in
-                    if isActive {
-                        SoftGateWindowController.shared.showGate(monitor: monitor, stats: stats, settings: settings)
-                    } else {
-                        SoftGateWindowController.shared.closeGate()
-                    }
+                    self?.handleGateActiveChanged(isActive)
                 }
             }
-            .onReceive(settings.$scoringSensitivity.removeDuplicates()) { sensitivity in
+            .store(in: &cancellables)
+    }
+
+    private func subscribeToSettings() {
+        settings.$scoringSensitivity
+            .removeDuplicates()
+            .sink { [weak self] sensitivity in
                 Task { @MainActor in
-                    monitor.setScoringSensitivity(sensitivity)
+                    self?.monitor.setScoringSensitivity(sensitivity)
                 }
             }
-            .onReceive(settings.$gateWarningDelay.removeDuplicates()) { delay in
+            .store(in: &cancellables)
+
+        settings.$gateWarningDelay
+            .removeDuplicates()
+            .sink { [weak self] delay in
                 Task { @MainActor in
-                    monitor.setGateWarningSettings(
+                    guard let self else { return }
+                    self.applyGateWarningSettings(
                         delay: delay,
-                        secondaryReminder: settings.secondaryGateReminder,
-                        language: settings.appLanguage
+                        secondaryReminder: self.settings.secondaryGateReminder,
+                        language: self.settings.appLanguage
                     )
                 }
             }
-            .onReceive(settings.$secondaryGateReminder.removeDuplicates()) { reminder in
+            .store(in: &cancellables)
+
+        settings.$secondaryGateReminder
+            .removeDuplicates()
+            .sink { [weak self] reminder in
                 Task { @MainActor in
-                    monitor.setGateWarningSettings(
-                        delay: settings.gateWarningDelay,
+                    guard let self else { return }
+                    self.applyGateWarningSettings(
+                        delay: self.settings.gateWarningDelay,
                         secondaryReminder: reminder,
-                        language: settings.appLanguage
+                        language: self.settings.appLanguage
                     )
                 }
             }
-            .onReceive(settings.$appLanguage.removeDuplicates()) { language in
+            .store(in: &cancellables)
+
+        settings.$appLanguage
+            .removeDuplicates()
+            .sink { [weak self] language in
                 Task { @MainActor in
-                    monitor.setGateWarningSettings(
-                        delay: settings.gateWarningDelay,
-                        secondaryReminder: settings.secondaryGateReminder,
+                    guard let self else { return }
+                    self.applyGateWarningSettings(
+                        delay: self.settings.gateWarningDelay,
+                        secondaryReminder: self.settings.secondaryGateReminder,
                         language: language
                     )
                 }
             }
+            .store(in: &cancellables)
+    }
+
+    private func handleGateActiveChanged(_ isActive: Bool) {
+        DiagnosticLog.log("gateActive changed: \(isActive)")
+        setStatusIconState(isActive ? .active : .idle)
+
+        if isActive {
+            DiagnosticLog.log("showGate requested")
+            SoftGateWindowController.shared.showGate(monitor: monitor, stats: stats, settings: settings)
+        } else {
+            DiagnosticLog.log("closeGate requested")
+            SoftGateWindowController.shared.closeGate()
+        }
+    }
+
+    private func setStatusIconState(_ state: StatusIconState) {
+        guard statusIconState != state else { return }
+        statusIconState = state
+        DiagnosticLog.log("statusIconState changed: \(state.diagnosticName)")
+    }
+
+    private func applyGateWarningSettings(
+        delay: GateWarningDelay,
+        secondaryReminder: GateSecondaryReminder,
+        language: AppLanguage
+    ) {
+        monitor.setGateWarningSettings(
+            delay: delay,
+            secondaryReminder: secondaryReminder,
+            language: language
+        )
+    }
+}
+
+private extension AppRuntime.StatusIconState {
+    var diagnosticName: String {
+        switch self {
+        case .idle: "idle"
+        case .active: "active"
+        }
+    }
+}
+
+private enum MenuBarIconCache {
+    static let idle = makeIcon(systemName: "figure.run")
+    static let active = makeIcon(systemName: "figure.strengthtraining.traditional")
+
+    static func image(for state: AppRuntime.StatusIconState) -> NSImage {
+        switch state {
+        case .idle: idle
+        case .active: active
+        }
+    }
+
+    private static func makeIcon(systemName: String) -> NSImage {
+        let image = NSImage(systemSymbolName: systemName, accessibilityDescription: nil)
+            ?? NSImage(size: NSSize(width: 18, height: 18))
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }
+}
+
+private struct MenuBarStatusLabel: View {
+    let state: AppRuntime.StatusIconState
+
+    var body: some View {
+        Image(nsImage: MenuBarIconCache.image(for: state))
     }
 }
 
@@ -917,7 +1020,7 @@ private struct StatisticsPNGExport {
 @MainActor
 private enum StatisticsShareService {
     private static let imageSize = CGSize(width: 900, height: 1180)
-    private static let exportScale: CGFloat = 4
+    private static let exportScale: CGFloat = 3
     private static var shareAnchorWindow: NSWindow?
     private static var temporaryShareURLs: [URL] = []
 
@@ -978,8 +1081,8 @@ private enum StatisticsShareService {
             pixelsWide: pixelWidth,
             pixelsHigh: pixelHeight,
             bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
+            samplesPerPixel: 3,
+            hasAlpha: false,
             isPlanar: false,
             colorSpaceName: .deviceRGB,
             bytesPerRow: 0,
