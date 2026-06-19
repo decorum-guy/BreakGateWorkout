@@ -176,7 +176,7 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
     }
 
     var isExperimental: Bool {
-        self == .tuckPlancheHold
+        self == .mountainClimbers || self == .tuckPlancheHold
     }
 
     var isTimed: Bool {
@@ -1837,6 +1837,12 @@ final class CameraModel: ObservableObject {
 
     func selectExerciseMode(_ mode: ExerciseMode) {
         guard activeWorkoutPlan.steps.indices.contains(currentStepIndex) else { return }
+        guard showExperimentalExercises || !mode.isExperimental else {
+            statusMessage = appLanguage == .russian
+                ? "Экспериментальные упражнения выключены в настройках."
+                : "Experimental exercises are disabled in Settings."
+            return
+        }
         activeWorkoutPlan.steps[currentStepIndex] = defaultStep(mode: mode, difficulty: activeWorkoutPlan.difficulty)
         applyCurrentStep(resetPoseService: true)
     }
