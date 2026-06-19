@@ -39,7 +39,7 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 36)
-            .padding(.top, 44)
+            .padding(.top, 116)
             .padding(.bottom, 32)
         }
         .frame(minWidth: 980, minHeight: 680)
