@@ -341,6 +341,7 @@ private struct MenuBarControlView: View {
                 pageContent
             }
         }
+        .id(menuContentID)
         .padding(14)
         .frame(width: menuOuterWidth, height: menuHeight, alignment: .topLeading)
         .background(Color.black.opacity(0.20))
@@ -358,7 +359,15 @@ private struct MenuBarControlView: View {
         }
     }
 
+    private var menuContentID: String {
+        monitor.gateActive ? "gate-active-menu" : "regular-menu-\(page)"
+    }
+
     private var menuOuterWidth: CGFloat {
+        if monitor.gateActive {
+            return 430
+        }
+
         switch page {
         case .configure:
             return 620
@@ -370,6 +379,10 @@ private struct MenuBarControlView: View {
     }
 
     private var menuHeight: CGFloat? {
+        if monitor.gateActive {
+            return 246
+        }
+
         switch page {
         case .configure:
             return 720
