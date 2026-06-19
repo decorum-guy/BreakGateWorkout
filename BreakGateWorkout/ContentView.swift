@@ -24,7 +24,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             AppBackground()
 
             VStack(alignment: .leading, spacing: 24) {
@@ -32,15 +32,14 @@ struct ContentView: View {
 
                 HStack(alignment: .top, spacing: 22) {
                     CameraStageView(camera: camera, monitor: monitor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     CameraControlPanel(camera: camera)
                         .frame(width: 340)
                 }
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 116)
-            .padding(.bottom, 32)
+            .padding(28)
+            .padding(.top, 112)
         }
         .frame(minWidth: 980, minHeight: 680)
         .preferredColorScheme(.dark)
