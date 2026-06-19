@@ -47,6 +47,7 @@ struct ContentView: View {
             DiagnosticLog.log("ContentView task started; configuring workout camera")
             camera.setAppLanguage(settings.appLanguage)
             camera.setStartPoseWaitDuration(settings.startPoseWaitDuration.timeInterval)
+            camera.setExperimentalExercisesVisible(settings.showExperimentalExercises)
             camera.configureVoiceControl(isEnabled: settings.isVoiceControlEnabled)
             camera.onWorkoutCompleted = { plan, completedSteps in
                 let reward = settings.rewardSetting(for: plan.difficulty)
@@ -74,6 +75,11 @@ struct ContentView: View {
         .onChange(of: settings.startPoseWaitDuration) { _, duration in
             Task { @MainActor in
                 camera.setStartPoseWaitDuration(duration.timeInterval)
+            }
+        }
+        .onChange(of: settings.showExperimentalExercises) { _, isVisible in
+            Task { @MainActor in
+                camera.setExperimentalExercisesVisible(isVisible)
             }
         }
     }
@@ -122,6 +128,7 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
     case plank
     case burpees
     case mountainClimbers
+    case tuckPlancheHold
 
     var id: Self { self }
 
@@ -133,6 +140,7 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .plank: "Plank"
         case .burpees: "Burpees"
         case .mountainClimbers: "Mountain Climbers"
+        case .tuckPlancheHold: "Tuck Planche Hold"
         }
     }
 
@@ -150,6 +158,8 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case (.burpees, .russian): "Бёрпи"
         case (.mountainClimbers, .english): "Mountain Climbers"
         case (.mountainClimbers, .russian): "Альпинист"
+        case (.tuckPlancheHold, .english): "Tuck Planche Hold"
+        case (.tuckPlancheHold, .russian): "Так планше"
         }
     }
 
@@ -161,7 +171,16 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .plank: "timer"
         case .burpees: "figure.highintensity.intervaltraining"
         case .mountainClimbers: "figure.climbing"
+        case .tuckPlancheHold: "figure.gymnastics"
         }
+    }
+
+    var isExperimental: Bool {
+        self == .tuckPlancheHold
+    }
+
+    var isTimed: Bool {
+        self == .plank || self == .tuckPlancheHold
     }
 }
 
@@ -222,15 +241,15 @@ struct WorkoutStep: Identifiable, Codable, Equatable {
     }
 
     var targetAmount: Int {
-        mode == .plank ? (targetSeconds ?? 60) : (targetReps ?? 20)
+        mode.isTimed ? (targetSeconds ?? 60) : (targetReps ?? 20)
     }
 
     var summary: String {
-        mode == .plank ? "\(mode.title) \(targetAmount)s" : "\(mode.title) x \(targetAmount)"
+        mode.isTimed ? "\(mode.title) \(targetAmount)s" : "\(mode.title) x \(targetAmount)"
     }
 
     func summary(_ language: AppLanguage) -> String {
-        mode == .plank ? "\(mode.title(language)) \(targetAmount)с" : "\(mode.title(language)) x \(targetAmount)"
+        mode.isTimed ? "\(mode.title(language)) \(targetAmount)с" : "\(mode.title(language)) x \(targetAmount)"
     }
 }
 
@@ -459,11 +478,11 @@ private struct WorkoutProgressHUD: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            if camera.selectedMode == .plank {
+            if camera.selectedMode.isTimed {
                 Text(camera.formattedPlankTime)
                     .font(.system(size: 64, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                Text(camera.currentWorkoutState == .plankBroken ? (camera.appLanguage == .russian ? "Планка сорвана - начни заново" : "Plank broken - restart") : (camera.appLanguage == .russian ? "Держи планку" : "Hold plank"))
+                Text(camera.timedHoldStatusText)
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .foregroundStyle(camera.currentWorkoutState == .plankBroken ? .red : .green)
             } else {
@@ -634,8 +653,8 @@ private struct PoseDebugOverlay: View {
             }
             Text("\(camera.appLanguage == .russian ? "Человек" : "Person"): \(camera.isPersonDetected ? (camera.appLanguage == .russian ? "ДА" : "YES") : (camera.appLanguage == .russian ? "НЕТ" : "NO"))")
             Text("\(camera.appLanguage == .russian ? "Уверенность" : "Confidence"): \(camera.confidence, specifier: "%.2f")")
-            if camera.selectedMode == .plank {
-                    Text("\(ExerciseMode.plank.title(camera.appLanguage)): \(camera.formattedPlankTime)")
+            if camera.selectedMode.isTimed {
+                    Text("\(camera.selectedMode.title(camera.appLanguage)): \(camera.formattedPlankTime)")
             }
             if !camera.isPersonDetected {
                 Text(camera.appLanguage == .russian ? "Поза не найдена" : "No pose detected")
@@ -866,7 +885,7 @@ private struct CameraControlPanel: View {
                 }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
-                    ForEach(ExerciseMode.allCases) { mode in
+                    ForEach(camera.availableExerciseModes) { mode in
                         ExerciseModeButton(
                             mode: mode,
                             isSelected: camera.selectedMode == mode,
@@ -1509,6 +1528,7 @@ final class CameraModel: ObservableObject {
     @Published private(set) var activeWorkoutPlan = WorkoutPlan.defaultPlan(for: .light)
     @Published private(set) var currentStepIndex = 0
     @Published private(set) var completedSteps: [WorkoutStep] = []
+    @Published private(set) var showExperimentalExercises = false
     let showCenteredPlankOverlay = false
     var onWorkoutCompleted: ((WorkoutPlan, [WorkoutStep]) -> Void)?
 
@@ -1546,6 +1566,22 @@ final class CameraModel: ObservableObject {
         }
     }
 
+    var timedHoldStatusText: String {
+        if selectedMode == .plank {
+            return currentWorkoutState == .plankBroken
+                ? (appLanguage == .russian ? "Планка сорвана - начни заново" : "Plank broken - restart")
+                : (appLanguage == .russian ? "Держи планку" : "Hold plank")
+        }
+
+        if selectedMode == .tuckPlancheHold {
+            return plankIsActive
+                ? (appLanguage == .russian ? "Держи так планше" : "Hold tuck planche")
+                : (appLanguage == .russian ? "Зафиксируй 2 секунды" : "Stabilize for 2 seconds")
+        }
+
+        return currentTargetLabel
+    }
+
     var previewAspectRatio: CGFloat {
         guard previewVideoSize.width > 0, previewVideoSize.height > 0 else {
             return 16.0 / 9.0
@@ -1579,10 +1615,10 @@ final class CameraModel: ObservableObject {
     }
 
     var currentTargetLabel: String {
-        if currentStep.mode == .plank {
+        if currentStep.mode.isTimed {
             return appLanguage == .russian
-                ? "Держи планку \(currentStep.targetAmount) секунд"
-                : "Hold plank for \(currentStep.targetAmount) seconds"
+                ? "\(currentStep.mode.title(appLanguage)): \(currentStep.targetAmount) секунд"
+                : "Hold \(currentStep.mode.title(appLanguage).lowercased()) for \(currentStep.targetAmount) seconds"
         }
 
         return appLanguage == .russian
@@ -1591,11 +1627,11 @@ final class CameraModel: ObservableObject {
     }
 
     var currentTargetAmount: Int {
-        selectedMode == .plank ? Int(plankDuration.rounded()) : targetRepCount
+        selectedMode.isTimed ? Int(plankDuration.rounded()) : targetRepCount
     }
 
     var remainingTargetAmount: Int {
-        if selectedMode == .plank {
+        if selectedMode.isTimed {
             return max(0, Int(plankTimeRemaining.rounded(.up)))
         }
 
@@ -1603,9 +1639,9 @@ final class CameraModel: ObservableObject {
     }
 
     var currentProgressSummary: String {
-        if selectedMode == .plank {
+        if selectedMode.isTimed {
             let prefix = appLanguage == .russian ? "Сейчас" : "Current"
-            return "\(prefix): \(ExerciseMode.plank.title(appLanguage)) \(max(0, currentTargetAmount - remainingTargetAmount)) / \(currentTargetAmount)s"
+            return "\(prefix): \(selectedMode.title(appLanguage)) \(max(0, currentTargetAmount - remainingTargetAmount)) / \(currentTargetAmount)s"
         }
 
         return "\(appLanguage == .russian ? "Сейчас" : "Current"): \(selectedMode.title(appLanguage)) \(repCount) / \(currentTargetAmount)"
@@ -1613,12 +1649,12 @@ final class CameraModel: ObservableObject {
 
     var currentRemainingSummary: String {
         if appLanguage == .russian {
-            return selectedMode == .plank
+            return selectedMode.isTimed
                 ? "Осталось: \(remainingTargetAmount)с"
                 : "Осталось: \(remainingTargetAmount)"
         }
 
-        return selectedMode == .plank
+        return selectedMode.isTimed
             ? "\(remainingTargetAmount)s \(L.t(.left, appLanguage))"
             : "\(remainingTargetAmount) \(L.t(.left, appLanguage))"
     }
@@ -1631,8 +1667,12 @@ final class CameraModel: ObservableObject {
 
     var canChangeDifficulty: Bool {
         guard currentStepIndex == 0, completedSteps.isEmpty, repCount == 0 else { return false }
-        guard selectedMode == .plank else { return true }
+        guard selectedMode.isTimed else { return true }
         return plankDuration - plankTimeRemaining < 0.5
+    }
+
+    var availableExerciseModes: [ExerciseMode] {
+        ExerciseMode.allCases.filter { showExperimentalExercises || !$0.isExperimental }
     }
 
     private let sessionController = CameraSessionController()
@@ -1728,6 +1768,10 @@ final class CameraModel: ObservableObject {
             primaryOverlayMessage = startPromptText()
             primaryOverlayTone = .warning
         }
+    }
+
+    func setExperimentalExercisesVisible(_ isVisible: Bool) {
+        showExperimentalExercises = isVisible
     }
 
     func configureVoiceControl(isEnabled: Bool) {
@@ -2010,8 +2054,8 @@ final class CameraModel: ObservableObject {
             return
         }
 
-        if selectedMode == .plank {
-            updatePlankState(with: update)
+        if selectedMode.isTimed {
+            updateTimedHoldState(with: update)
         } else {
             repCount = update.repCount
             currentWorkoutState = update.workoutState
@@ -2030,7 +2074,7 @@ final class CameraModel: ObservableObject {
         let step = currentStep
         selectedMode = step.mode
 
-        if step.mode == .plank {
+        if step.mode.isTimed {
             plankDuration = Double(step.targetSeconds ?? step.targetAmount)
         } else {
             targetRepCount = step.targetReps ?? step.targetAmount
@@ -2045,17 +2089,21 @@ final class CameraModel: ObservableObject {
     }
 
     private func defaultStep(mode: ExerciseMode, difficulty: WorkoutDifficulty) -> WorkoutStep {
-        if mode == .plank {
+        if mode.isTimed {
             let seconds: Int
-            switch difficulty {
-            case .light:
-                seconds = 45
-            case .medium:
-                seconds = 60
-            case .hard, .extreme, .extremePlus:
-                seconds = 90
+            if mode == .tuckPlancheHold {
+                seconds = 5
+            } else {
+                switch difficulty {
+                case .light:
+                    seconds = 45
+                case .medium:
+                    seconds = 60
+                case .hard, .extreme, .extremePlus:
+                    seconds = 90
+                }
             }
-            return WorkoutStep(mode: .plank, targetSeconds: seconds)
+            return WorkoutStep(mode: mode, targetSeconds: seconds)
         }
 
         let reps: Int
@@ -2089,7 +2137,7 @@ final class CameraModel: ObservableObject {
             case .hard, .extreme, .extremePlus:
                 reps = 20
             }
-        case .plank:
+        case .plank, .tuckPlancheHold:
             reps = 20
         }
         return WorkoutStep(mode: mode, targetReps: reps)
@@ -2102,7 +2150,7 @@ final class CameraModel: ObservableObject {
         confidence = 0
         isPersonDetected = false
         posePoints = []
-        plankTimeRemaining = selectedMode == .plank ? plankDuration : 0
+        plankTimeRemaining = selectedMode.isTimed ? plankDuration : 0
         plankIsActive = false
         lastPlankTick = nil
         plankBrokenUntil = nil
@@ -2189,11 +2237,13 @@ final class CameraModel: ObservableObject {
         zoomFactor = source.inferredZoomFactor
     }
 
-    private func updatePlankState(with update: PoseDetectionUpdate) {
+    private func updateTimedHoldState(with update: PoseDetectionUpdate) {
         let now = Date()
-        let isStable = update.isPersonDetected && update.confidence >= 0.22 && update.workoutState == .plankActive
+        let requiredConfidence: Float = selectedMode == .tuckPlancheHold ? 0.30 : 0.22
+        let requiredStableDuration: TimeInterval = selectedMode == .tuckPlancheHold ? 2.0 : 0
+        let isPoseActive = update.isPersonDetected && update.confidence >= requiredConfidence && update.workoutState == .plankActive
 
-        if !isStable {
+        if !isPoseActive {
             if selectedMode == .plank && plankWasStable && plankTimeRemaining > 0 {
                 soundFeedback.playPlankFail()
                 showCelebration(message: appLanguage == .russian ? "Планка сорвана" : "Plank broken", tone: .failure)
@@ -2204,22 +2254,44 @@ final class CameraModel: ObservableObject {
             lastPlankTick = nil
             plankBrokenUntil = now.addingTimeInterval(1.5)
             currentWorkoutState = .plankBroken
-            currentPoseState = WorkoutState.plankBroken.rawValue
+            currentPoseState = update.debugState
             lastCelebratedPlankBucket = 0
             lastFinalPlankSecondSound = nil
             plankWasStable = false
             return
         }
 
-        if let brokenUntil = plankBrokenUntil, now < brokenUntil {
+        if selectedMode == .plank, let brokenUntil = plankBrokenUntil, now < brokenUntil {
             currentWorkoutState = .plankBroken
             currentPoseState = WorkoutState.plankBroken.rawValue
             return
         }
 
         plankBrokenUntil = nil
-        plankIsActive = true
         plankWasStable = true
+
+        if lastPlankTick == nil {
+            lastPlankTick = now
+            currentWorkoutState = .plankActive
+            currentPoseState = update.debugState
+            return
+        }
+
+        if !plankIsActive, let stableSince = lastPlankTick {
+            guard now.timeIntervalSince(stableSince) >= requiredStableDuration else {
+                currentWorkoutState = .plankActive
+                currentPoseState = appLanguage == .russian ? "стабилизация" : "stabilizing"
+                return
+            }
+
+            plankIsActive = true
+            lastPlankTick = now
+            currentWorkoutState = .plankActive
+            currentPoseState = update.debugState
+            return
+        }
+
+        plankIsActive = true
 
         if let lastPlankTick {
             plankTimeRemaining = max(0, plankTimeRemaining - now.timeIntervalSince(lastPlankTick))
@@ -2227,9 +2299,11 @@ final class CameraModel: ObservableObject {
 
         lastPlankTick = now
         currentWorkoutState = .plankActive
-        currentPoseState = WorkoutState.plankActive.rawValue
-        playPlankFinalCountdownIfNeeded()
-        celebratePlankProgressIfNeeded()
+        currentPoseState = update.debugState
+        if selectedMode == .plank {
+            playPlankFinalCountdownIfNeeded()
+            celebratePlankProgressIfNeeded()
+        }
         checkWorkoutCompletion()
     }
 
@@ -2272,12 +2346,16 @@ final class CameraModel: ObservableObject {
             coachingMessage = appLanguage == .russian ? "Выпрями плечи, таз и колени" : "Straighten shoulders, hips, knees"
         } else if selectedMode == .burpees {
             switch currentPoseState {
-            case BurpeePhase.standing.rawValue:
+            case BurpeePhase.standing.rawValue, BurpeePhase.initialJump.rawValue:
                 coachingMessage = appLanguage == .russian ? "Встань ровно" : "Stand tall"
+            case BurpeePhase.squat.rawValue, BurpeePhase.returnSquat.rawValue:
+                coachingMessage = appLanguage == .russian ? "Ноги назад / прыжок вверх" : "Kick back / jump up"
             case BurpeePhase.plank.rawValue:
                 coachingMessage = appLanguage == .russian ? "Вниз в отжимание" : "Drop to push-up"
             case BurpeePhase.pushUpDown.rawValue:
-                coachingMessage = appLanguage == .russian ? "Вернись в стойку" : "Back to standing"
+                coachingMessage = appLanguage == .russian ? "Вернись в присед" : "Back to squat"
+            case BurpeePhase.finalJump.rawValue:
+                coachingMessage = appLanguage == .russian ? "Выпрыгни вверх" : "Jump up"
             default:
                 coachingMessage = appLanguage == .russian ? "Отожмись" : "Push up"
             }
@@ -2450,7 +2528,7 @@ final class CameraModel: ObservableObject {
         case .pushUps, .squats, .abs, .burpees, .mountainClimbers:
             guard repCount >= targetRepCount else { return }
             completeCurrentStep(amount: repCount)
-        case .plank:
+        case .plank, .tuckPlancheHold:
             guard plankTimeRemaining <= 0, plankIsActive else { return }
             completeCurrentStep(amount: Int(plankDuration.rounded()))
         }
@@ -2458,7 +2536,7 @@ final class CameraModel: ObservableObject {
 
     private func completeCurrentStep(amount: Int) {
         var completedStep = currentStep
-        if completedStep.mode == .plank {
+        if completedStep.mode.isTimed {
             completedStep.targetSeconds = amount
             completedStep.targetReps = nil
         } else {
@@ -2687,11 +2765,14 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private let absContractedThreshold: CGFloat = 55
     private let absExtendedThreshold: CGFloat = 105
     private let plankStraightThreshold: CGFloat = 145
-    private let mountainClimberPlankThreshold: CGFloat = 132
+    private let mountainClimberPlankThreshold: CGFloat = 124
     private let burpeeStandingThreshold: CGFloat = 150
     private let burpeePushUpDownThreshold: CGFloat = 105
+    private let burpeeSquatThreshold: CGFloat = 125
     private let mountainClimberHipDriveThreshold: CGFloat = 138
     private let mountainClimberKneeToShoulderRatio: CGFloat = 0.74
+    private let tuckPlancheArmStraightThreshold: CGFloat = 150
+    private let tuckPlancheKneeToTorsoRatio: CGFloat = 1.35
 
     private var mode: ExerciseMode = .pushUps
     private var lastProcessedTime: CFTimeInterval = 0
@@ -2702,6 +2783,7 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private var squatPosition: ExercisePosition = .waiting
     private var absPosition: ExercisePosition = .waiting
     private var burpeePhase: BurpeePhase = .standing
+    private var burpeeLastHipY: CGFloat?
     private var mountainPhase: MountainClimberPhase = .plankReady
     private var lastMountainDriveSide: BodySide?
     private var countingEnabled = false
@@ -2764,6 +2846,7 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         squatPosition = .waiting
         absPosition = .waiting
         burpeePhase = .standing
+        burpeeLastHipY = nil
         mountainPhase = .plankReady
         lastMountainDriveSide = nil
     }
@@ -2885,6 +2968,8 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             return isPlankFormValid(points: points)
         case .mountainClimbers:
             return isMountainClimberBaseValid(points: points)
+        case .tuckPlancheHold:
+            return isTuckPlancheValid(points: points)
         case .burpees:
             return isStandingFormValid(points: points)
         case .squats:
@@ -2944,6 +3029,9 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         case .plank:
             let isValid = isPlankFormValid(points: points)
             return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "plank active" : "plank broken")
+        case .tuckPlancheHold:
+            let isValid = isTuckPlancheValid(points: points)
+            return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "tuck planche hold" : "tuck planche setup")
         case .burpees:
             let counted = updateBurpeeState(points: points)
             return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: burpeePhase.rawValue)
@@ -3043,7 +3131,20 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
 
     private func updateBurpeeState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
         let isStanding = isStandingFormValid(points: points)
-        let isPlank = isPlankFormValid(points: points)
+        let isSquat = isSquatLike(points: points)
+        let isPlank = isBurpeePlankValid(points: points)
+        let hipY = averageY(points: points, joints: [.leftHip, .rightHip])
+        let upwardBurst = hipY.map { currentY in
+            if let burpeeLastHipY {
+                return currentY - burpeeLastHipY > 0.025
+            }
+            return false
+        } ?? false
+        defer {
+            if let hipY {
+                burpeeLastHipY = hipY
+            }
+        }
         let elbowAngle = bestAngle(
             points: points,
             firstCandidates: [.leftShoulder, .rightShoulder],
@@ -3051,30 +3152,43 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             lastCandidates: [.leftWrist, .rightWrist]
         )
         let isPushUpLow = isPlank && (elbowAngle ?? 180) <= burpeePushUpDownThreshold
+        let isJumpOrStand = isStanding && (upwardBurst || isJumpLike(points: points))
 
         switch burpeePhase {
         case .standing:
-            if isPushUpLow {
-                burpeePhase = .pushUpDown
-            } else if isPlank {
+            if isStanding && upwardBurst {
+                burpeePhase = .initialJump
+            } else if isSquat {
+                burpeePhase = .squat
+            }
+        case .initialJump:
+            if isSquat {
+                burpeePhase = .squat
+            }
+        case .squat:
+            if isPlank {
                 burpeePhase = .plank
             }
         case .plank:
             if isPushUpLow {
                 burpeePhase = .pushUpDown
-            } else if isStanding {
-                burpeePhase = .standing
             }
         case .pushUpDown:
-            if isStanding {
+            if isSquat {
+                burpeePhase = .returnSquat
+            }
+        case .returnSquat:
+            if isJumpOrStand {
                 repCount += 1
-                burpeePhase = .returnStanding
+                burpeePhase = .finalJump
                 print("BreakGateWorkout pose: rep counted (\(repCount))")
                 return true
             }
-        case .returnStanding:
-            if !isStanding {
-                burpeePhase = isPlank ? .plank : .standing
+        case .finalJump:
+            if isSquat {
+                burpeePhase = .squat
+            } else if isStanding {
+                burpeePhase = .standing
             }
         }
 
@@ -3103,9 +3217,7 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             return false
         }
 
-        let previousPhase = mountainPhase
         mountainPhase = driveSide == .left ? .leftKneeDrive : .rightKneeDrive
-        guard previousPhase == .plankReady else { return false }
 
         if let lastMountainDriveSide, lastMountainDriveSide != driveSide {
             repCount += 1
@@ -3150,20 +3262,96 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     }
 
     private func isMountainClimberBaseValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
-        guard let bodyLineAngle = bestAngle(
+        let leftLine = sideBodyLineAngle(points: points, side: .left)
+        let rightLine = sideBodyLineAngle(points: points, side: .right)
+        return [leftLine, rightLine].compactMap { $0 }.contains { $0 >= mountainClimberPlankThreshold }
+    }
+
+    private func isBurpeePlankValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+        let leftLine = sideBodyLineAngle(points: points, side: .left)
+        let rightLine = sideBodyLineAngle(points: points, side: .right)
+        return [leftLine, rightLine].compactMap { $0 }.contains { $0 >= mountainClimberPlankThreshold }
+    }
+
+    private func sideBodyLineAngle(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], side: BodySide) -> CGFloat? {
+        let shoulder: VNHumanBodyPoseObservation.JointName = side == .left ? .leftShoulder : .rightShoulder
+        let hip: VNHumanBodyPoseObservation.JointName = side == .left ? .leftHip : .rightHip
+        let ankle: VNHumanBodyPoseObservation.JointName = side == .left ? .leftAnkle : .rightAnkle
+        guard let shoulderPoint = validPoint(points[shoulder]),
+              let hipPoint = validPoint(points[hip]),
+              let anklePoint = validPoint(points[ankle]) else {
+            return nil
+        }
+        return angle(first: shoulderPoint, middle: hipPoint, last: anklePoint)
+    }
+
+    private func isSquatLike(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+        guard let kneeAngle = bestAngle(
             points: points,
-            firstCandidates: [.leftShoulder, .rightShoulder],
-            middleCandidates: [.leftHip, .rightHip],
-            lastCandidates: [.leftKnee, .rightKnee]
+            firstCandidates: [.leftHip, .rightHip],
+            middleCandidates: [.leftKnee, .rightKnee],
+            lastCandidates: [.leftAnkle, .rightAnkle]
         ) else {
             return false
         }
 
-        return bodyLineAngle >= mountainClimberPlankThreshold
+        return kneeAngle <= burpeeSquatThreshold
+    }
+
+    private func isJumpLike(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+        guard let kneeAngle = bestAngle(
+            points: points,
+            firstCandidates: [.leftHip, .rightHip],
+            middleCandidates: [.leftKnee, .rightKnee],
+            lastCandidates: [.leftAnkle, .rightAnkle]
+        ) else {
+            return false
+        }
+
+        return kneeAngle >= squatKneeStraightThreshold
+    }
+
+    private func isTuckPlancheValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+        guard
+            let leftWrist = validPoint(points[.leftWrist]),
+            let rightWrist = validPoint(points[.rightWrist]),
+            let leftElbow = validPoint(points[.leftElbow]),
+            let rightElbow = validPoint(points[.rightElbow]),
+            let leftShoulder = validPoint(points[.leftShoulder]),
+            let rightShoulder = validPoint(points[.rightShoulder])
+        else {
+            return false
+        }
+
+        let kneePoints = [points[.leftKnee], points[.rightKnee]].compactMap(validPoint)
+        let anklePoints = [points[.leftAnkle], points[.rightAnkle]].compactMap(validPoint)
+        guard !kneePoints.isEmpty, !anklePoints.isEmpty else { return false }
+
+        let leftArmAngle = angle(first: leftShoulder, middle: leftElbow, last: leftWrist)
+        let rightArmAngle = angle(first: rightShoulder, middle: rightElbow, last: rightWrist)
+        guard leftArmAngle >= tuckPlancheArmStraightThreshold, rightArmAngle >= tuckPlancheArmStraightThreshold else {
+            return false
+        }
+
+        let highestWristY = max(leftWrist.y, rightWrist.y)
+        let averageElbowY = (leftElbow.y + rightElbow.y) / 2
+        guard anklePoints.contains(where: { $0.y >= highestWristY && $0.y >= averageElbowY - 0.06 }) else {
+            return false
+        }
+
+        let shoulderCenter = CGPoint(x: (leftShoulder.x + rightShoulder.x) / 2, y: (leftShoulder.y + rightShoulder.y) / 2)
+        let torsoReference = max(0.01, distance(shoulderCenter, CGPoint(x: (leftElbow.x + rightElbow.x) / 2, y: (leftElbow.y + rightElbow.y) / 2)))
+        return kneePoints.contains { distance($0, shoulderCenter) / torsoReference <= tuckPlancheKneeToTorsoRatio }
     }
 
     private func distance(_ first: CGPoint, _ second: CGPoint) -> CGFloat {
         hypot(first.x - second.x, first.y - second.y)
+    }
+
+    private func averageY(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], joints: [VNHumanBodyPoseObservation.JointName]) -> CGFloat? {
+        let values = joints.compactMap { validPoint(points[$0])?.y }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / CGFloat(values.count)
     }
 
     private func bestAngle(
@@ -3270,9 +3458,12 @@ private enum ExercisePosition {
 
 private enum BurpeePhase: String {
     case standing = "burpeeStanding"
+    case initialJump = "burpeeInitialJump"
+    case squat = "burpeeSquat"
     case plank = "burpeePlank"
     case pushUpDown = "burpeePushUpDown"
-    case returnStanding = "burpeeReturnStanding"
+    case returnSquat = "burpeeReturnSquat"
+    case finalJump = "burpeeFinalJump"
 }
 
 private enum MountainClimberPhase: String {
@@ -3466,7 +3657,8 @@ private final class VoiceCommandService {
             (.exercise(.pushUps), latestKeywordPosition(in: exerciseText, keywords: ["push", "push-up", "pushups", "push ups", "отжим", "отжимания", "пушап", "пуш ап"])),
             (.exercise(.abs), latestKeywordPosition(in: exerciseText, keywords: ["abs", "sit-up", "situps", "sit ups", "press", "пресс"])),
             (.exercise(.burpees), latestKeywordPosition(in: exerciseText, keywords: ["burpees", "burpee", "берпи", "бёрпи"])),
-            (.exercise(.mountainClimbers), latestKeywordPosition(in: exerciseText, keywords: ["mountain climbers", "climbers", "клаймберсы", "альпинист", "альпинисты"]))
+            (.exercise(.mountainClimbers), latestKeywordPosition(in: exerciseText, keywords: ["mountain climbers", "climbers", "клаймберсы", "альпинист", "альпинисты"])),
+            (.exercise(.tuckPlancheHold), latestKeywordPosition(in: exerciseText, keywords: ["tuck planche", "planche", "так планше", "так планч", "планше", "планч"]))
         ]
 
         if let latestExercise = exerciseMatches.compactMap({ command, position in

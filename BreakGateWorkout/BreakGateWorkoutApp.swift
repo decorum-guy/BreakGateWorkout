@@ -589,6 +589,11 @@ private struct MenuBarControlView: View {
             }
             .pickerStyle(.menu)
 
+            Toggle(language == .russian ? "Показывать экспериментальные упражнения" : "Show experimental exercises", isOn: Binding(
+                get: { settings.showExperimentalExercises },
+                set: { settings.setShowExperimentalExercisesSafely($0) }
+            ))
+
             Toggle(language == .russian ? "Музыка гейта" : "Gate music", isOn: Binding(
                 get: { settings.gateMusicEnabled },
                 set: { settings.setGateMusicEnabledSafely($0) }
@@ -1809,6 +1814,9 @@ final class WorkoutSettingsStore: ObservableObject {
     @Published var userDisplayName: String {
         didSet { save() }
     }
+    @Published var showExperimentalExercises: Bool {
+        didSet { save() }
+    }
     @Published private(set) var launchAtLoginErrorMessage: String?
 
     private let defaults = UserDefaults.standard
@@ -1826,6 +1834,7 @@ final class WorkoutSettingsStore: ObservableObject {
     private let secondaryGateReminderKey = "BreakGateWorkout.secondaryGateReminder"
     private let startPoseWaitDurationKey = "BreakGateWorkout.startPoseWaitDuration"
     private let userDisplayNameKey = "BreakGateWorkout.userDisplayName"
+    private let showExperimentalExercisesKey = "BreakGateWorkout.showExperimentalExercises"
 
     init() {
         if let data = defaults.data(forKey: planKey),
@@ -1903,6 +1912,7 @@ final class WorkoutSettingsStore: ObservableObject {
             startPoseWaitDuration = .seconds15
         }
         userDisplayName = defaults.string(forKey: userDisplayNameKey) ?? ""
+        showExperimentalExercises = defaults.bool(forKey: showExperimentalExercisesKey)
 
         normalizePlan()
         applySoundSettings()
@@ -2025,6 +2035,13 @@ final class WorkoutSettingsStore: ObservableObject {
         }
     }
 
+    func setShowExperimentalExercisesSafely(_ isVisible: Bool) {
+        Task { @MainActor in
+            guard self.showExperimentalExercises != isVisible else { return }
+            self.showExperimentalExercises = isVisible
+        }
+    }
+
     func update(plan: WorkoutPlan, rewardSettings: [WorkoutDifficulty: DifficultyRewardSetting]) {
         self.plan = Self.normalized(plan)
         self.rewardSettings = rewardSettings
@@ -2068,8 +2085,9 @@ final class WorkoutSettingsStore: ObservableObject {
     }
 
     private static func normalizedStep(_ step: WorkoutStep) -> WorkoutStep {
-        if step.mode == .plank {
-            return WorkoutStep(id: step.id, mode: .plank, targetSeconds: max(10, step.targetSeconds ?? 60))
+        if step.mode.isTimed {
+            let minimum = step.mode == .tuckPlancheHold ? 5 : 10
+            return WorkoutStep(id: step.id, mode: step.mode, targetSeconds: max(minimum, step.targetSeconds ?? minimum))
         }
 
         return WorkoutStep(id: step.id, mode: step.mode, targetReps: max(1, step.targetReps ?? 20))
@@ -2095,6 +2113,7 @@ final class WorkoutSettingsStore: ObservableObject {
         defaults.set(secondaryGateReminder.rawValue, forKey: secondaryGateReminderKey)
         defaults.set(startPoseWaitDuration.rawValue, forKey: startPoseWaitDurationKey)
         defaults.set(userDisplayName, forKey: userDisplayNameKey)
+        defaults.set(showExperimentalExercises, forKey: showExperimentalExercisesKey)
     }
 }
 
@@ -2235,6 +2254,11 @@ private struct AppSettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+
+                Toggle(language == .russian ? "Показывать экспериментальные упражнения" : "Show experimental exercises", isOn: Binding(
+                    get: { settings.showExperimentalExercises },
+                    set: { settings.setShowExperimentalExercisesSafely($0) }
+                ))
             }
             .configurationCard()
 
@@ -2355,6 +2379,7 @@ private struct AboutBreakGateView: View {
                     "Abs start from a lying position with the torso down and knees allowed to be slightly bent.",
                     "Burpees start from standing and count only after a standing → low push-up → standing cycle.",
                     "Mountain Climbers start from plank and count one left-right knee-drive pair as one rep.",
+                    "Experimental exercises can be enabled in Settings. Tuck Planche Hold waits for a stable two-second hold before its timer starts.",
                     "When the starting position is accepted, you hear a short tick and see Go!"
                 ]),
                 ("Difficulty", [
@@ -2362,7 +2387,7 @@ private struct AboutBreakGateView: View {
                     "Medium and above reduce future score growth for a while after completion.",
                     "Hard, Extreme, and Extreme+ are longer plans with stronger rewards.",
                     "Rewards do not erase old activity by themselves; completing the workout resets score to zero.",
-                    "You can customize steps, reps, plank seconds, sensitivity, and reward multipliers."
+                    "You can customize steps, reps, timed holds, sensitivity, and reward multipliers."
                 ]),
                 ("Voice Commands", [
                     "Voice control is optional. Turn it on only if you want hands-free control in the gate.",
@@ -2418,6 +2443,7 @@ private struct AboutBreakGateView: View {
                     "Пресс стартует из положения лежа: корпус лежит, ноги могут быть немного согнуты.",
                     "Бёрпи стартуют из стойки и считаются только после цикла стойка → низкая фаза отжимания → стойка.",
                     "Альпинист стартует из планки и считает пару левое-правое подтягивание колена как один повтор.",
+                    "Экспериментальные упражнения можно включить в настройках. Так планше сначала ждет стабильную фиксацию две секунды, потом запускает таймер.",
                     "Когда исходная поза принята, прозвучит короткий сигнал и появится Начинай!"
                 ]),
                 ("Сложности", [
@@ -2425,7 +2451,7 @@ private struct AboutBreakGateView: View {
                     "Средняя и выше замедляют будущий набор очков после завершения.",
                     "Сложная, Экстремальная и Экстремальная+ длиннее и дают более сильные бонусы.",
                     "Бонус не стирает старые очки сам по себе; завершение тренировки сбрасывает счет в ноль.",
-                    "Можно настроить шаги, повторы, секунды планки, чувствительность и бонусные множители."
+                    "Можно настроить шаги, повторы, удержания по времени, чувствительность и бонусные множители."
                 ]),
                 ("Голосовые команды", [
                     "Голосовое управление необязательно. Включай его только если нужны команды без рук в гейте.",
@@ -2537,6 +2563,7 @@ private struct WorkoutConfigurationView: View {
                                 moveDown: { moveStep(from: index, offset: 1) },
                                 remove: { removeStep(at: index) },
                                 difficulty: draftPlan.difficulty,
+                                showExperimentalExercises: settings.showExperimentalExercises,
                                 language: language
                             )
                         }
@@ -2638,7 +2665,12 @@ private struct WorkoutStepEditor: View {
     let moveDown: () -> Void
     let remove: () -> Void
     let difficulty: WorkoutDifficulty
+    let showExperimentalExercises: Bool
     let language: AppLanguage
+
+    private var availableModes: [ExerciseMode] {
+        ExerciseMode.allCases.filter { showExperimentalExercises || !$0.isExperimental }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2667,8 +2699,8 @@ private struct WorkoutStepEditor: View {
                 get: { step.mode },
                 set: { mode in
                     step.mode = mode
-                    if mode == .plank {
-                        step.targetSeconds = step.targetSeconds ?? 90
+                    if mode.isTimed {
+                        step.targetSeconds = step.targetSeconds ?? defaultSeconds(for: mode)
                         step.targetReps = nil
                     } else {
                         step.targetReps = defaultReps(for: mode, difficulty: difficulty)
@@ -2676,22 +2708,21 @@ private struct WorkoutStepEditor: View {
                     }
                 }
             )) {
-                ForEach(ExerciseMode.allCases) { mode in
-                    Text(mode.title(language)).tag(mode)
+                ForEach(availableModes) { mode in
+                    Label(mode.title(language), systemImage: mode.systemImage).tag(mode)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .pickerStyle(.menu)
 
-            if step.mode == .plank {
-                TargetNumberEditor(
+            if step.mode.isTimed {
+                TargetSliderEditor(
                     title: L.t(.seconds, language),
                     value: Binding(
-                        get: { step.targetSeconds ?? 90 },
+                        get: { step.targetSeconds ?? defaultSeconds(for: step.mode) },
                         set: { step.targetSeconds = $0 }
                     ),
-                    range: 10...300,
-                    step: 5
+                    range: step.mode == .tuckPlancheHold ? 5...60 : 10...300,
+                    step: step.mode == .tuckPlancheHold ? 1 : 5
                 )
             } else {
                 TargetNumberEditor(
@@ -2711,6 +2742,10 @@ private struct WorkoutStepEditor: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         }
+    }
+
+    private func defaultSeconds(for mode: ExerciseMode) -> Int {
+        mode == .tuckPlancheHold ? 5 : 90
     }
 
     private func defaultReps(for mode: ExerciseMode, difficulty: WorkoutDifficulty) -> Int {
@@ -2734,8 +2769,39 @@ private struct WorkoutStepEditor: View {
             case .medium: return 15
             case .hard, .extreme, .extremePlus: return 20
             }
-        case .plank:
+        case .plank, .tuckPlancheHold:
             return 20
+        }
+    }
+}
+
+private struct TargetSliderEditor: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let step: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(title):")
+                Spacer()
+                Text("\(value)")
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+            }
+
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { newValue in
+                        let stepped = Int((newValue / Double(step)).rounded()) * step
+                        value = min(range.upperBound, max(range.lowerBound, stepped))
+                    }
+                ),
+                in: Double(range.lowerBound)...Double(range.upperBound),
+                step: Double(step)
+            )
         }
     }
 }
@@ -3268,7 +3334,7 @@ final class WorkoutStats: ObservableObject {
     }
 
     func recordWorkoutCompletion(mode: ExerciseMode, amount: Int, date: Date = Date()) {
-        recordWorkoutCompletion(steps: [WorkoutStep(mode: mode, targetReps: mode == .plank ? nil : amount, targetSeconds: mode == .plank ? amount : nil)], date: date)
+        recordWorkoutCompletion(steps: [WorkoutStep(mode: mode, targetReps: mode.isTimed ? nil : amount, targetSeconds: mode.isTimed ? amount : nil)], date: date)
     }
 
     func recordWorkoutCompletion(steps: [WorkoutStep], date: Date = Date()) {
@@ -3284,6 +3350,8 @@ final class WorkoutStats: ObservableObject {
             case .abs:
                 totalSitUps += step.targetReps ?? 0
             case .plank:
+                totalPlankSeconds += step.targetSeconds ?? 0
+            case .tuckPlancheHold:
                 totalPlankSeconds += step.targetSeconds ?? 0
             case .burpees:
                 totalBurpees += step.targetReps ?? 0
