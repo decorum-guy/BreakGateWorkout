@@ -1887,6 +1887,8 @@ final class CameraModel: ObservableObject {
     }
 
     private func handleVoiceCommand(_ command: VoiceCommand, transcript: String) {
+        clearCommandToast()
+
         switch command {
         case .startWorkout:
             voiceStartRequested = true
@@ -1908,6 +1910,8 @@ final class CameraModel: ObservableObject {
                 return
             }
             guard difficulty != activeWorkoutPlan.difficulty else {
+                voiceStatusMessage = "\(L.t(.voice, appLanguage)): \(difficulty.title(appLanguage))"
+                showCommandToast(message: "\(L.t(.difficulty, appLanguage)): \(difficulty.title(appLanguage))")
                 return
             }
             selectDifficulty(difficulty)
@@ -3717,6 +3721,8 @@ private final class VoiceCommandService {
             return .startWorkout
         }
 
+        let difficultyMatch = parseDifficultyCommandWithPosition(from: text)
+
         guard let exerciseAnchorPosition = latestKeywordPosition(in: text, keywords: [
             "change to",
             "switch to",
@@ -3732,7 +3738,7 @@ private final class VoiceCommandService {
             "перейди на",
             "перейти на"
         ]) else {
-            return parseDifficultyCommand(from: text)
+            return difficultyMatch?.command
         }
 
         let exerciseText = String(text.dropFirst(exerciseAnchorPosition))
@@ -3746,30 +3752,41 @@ private final class VoiceCommandService {
             (.exercise(.tuckPlancheHold), latestKeywordPosition(in: exerciseText, keywords: ["tuck planche", "planche", "так планше", "так планч", "планше", "планч"]))
         ]
 
-        if let latestExercise = exerciseMatches.compactMap({ command, position in
-            position.map { (command, $0) }
-        }).max(by: { $0.1 < $1.1 }) {
-            return latestExercise.0
-        }
+        let exerciseMatch = exerciseMatches.compactMap({ command, position in
+            position.map { (command: command, position: exerciseAnchorPosition + $0) }
+        }).max(by: { $0.position < $1.position })
 
-        return parseDifficultyCommand(from: text)
+        switch (exerciseMatch, difficultyMatch) {
+        case let (exercise?, difficulty?):
+            return exercise.position > difficulty.position ? exercise.command : difficulty.command
+        case let (exercise?, nil):
+            return exercise.command
+        case let (nil, difficulty?):
+            return difficulty.command
+        case (nil, nil):
+            return nil
+        }
     }
 
     private func parseDifficultyCommand(from text: String) -> VoiceCommand? {
-        guard containsAny(text, ["difficulty", "сложность"]) else { return nil }
+        parseDifficultyCommandWithPosition(from: text)?.command
+    }
+
+    private func parseDifficultyCommandWithPosition(from text: String) -> (command: VoiceCommand, position: Int)? {
+        guard latestKeywordPosition(in: text, keywords: ["difficulty", "сложность", "сложности", "уровень"]) != nil else { return nil }
 
         let difficultyMatches: [(VoiceCommand, Int?)] = [
             (.difficulty(.extremePlus), latestKeywordPosition(in: text, keywords: ["extreme plus", "extreme+", "экстрим плюс", "экстремальная плюс"])),
             (.difficulty(.extreme), latestKeywordPosition(in: text, keywords: ["extreme", "экстрим", "экстремальная"])),
             (.difficulty(.hard), latestKeywordPosition(in: text, keywords: ["hard", "сложный", "сложная", "тяжелый", "тяжелая"])),
             (.difficulty(.medium), latestKeywordPosition(in: text, keywords: ["medium", "normal", "средний", "средняя"])),
-            (.difficulty(.light), latestKeywordPosition(in: text, keywords: ["light", "easy", "легкий", "легкая", "леегкая"]))
+            (.difficulty(.light), latestKeywordPosition(in: text, keywords: ["light", "easy", "легкий", "легкая", "леегкая", "легко", "простая", "простой", "лайт"]))
         ]
 
         if let latestDifficulty = difficultyMatches.compactMap({ command, position in
-            position.map { (command, $0) }
+            position.map { (command: command, position: $0) }
         }).max(by: { $0.1 < $1.1 }) {
-            return latestDifficulty.0
+            return latestDifficulty
         }
 
         return nil
