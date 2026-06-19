@@ -380,7 +380,7 @@ private struct MenuBarControlView: View {
 
     private var menuHeight: CGFloat? {
         if monitor.gateActive {
-            return 246
+            return activeGateMenuHeight
         }
 
         switch page {
@@ -391,6 +391,17 @@ private struct MenuBarControlView: View {
         default:
             return nil
         }
+    }
+
+    private var activeGateMenuHeight: CGFloat {
+        let stepCount = settings.plan.steps.count
+        if stepCount <= 1 {
+            return 170
+        }
+        if stepCount <= 3 {
+            return 184
+        }
+        return 206
     }
 
     @ViewBuilder
