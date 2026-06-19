@@ -39,7 +39,7 @@ struct ContentView: View {
                 }
             }
             .padding(28)
-            .padding(.top, 52)
+            .padding(.top, 112)
         }
         .frame(minWidth: 980, minHeight: 680)
         .preferredColorScheme(.dark)
