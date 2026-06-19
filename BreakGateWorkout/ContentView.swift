@@ -116,10 +116,7 @@ private struct GateScreenLayout: View {
 
     var body: some View {
         GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 28) {
-                HeaderView(language: language)
-                mainArea
-            }
+            mainArea
             .padding(.horizontal, 36)
             .padding(.top, gateTopInset(for: geometry.size.height))
             .padding(.bottom, 32)
@@ -127,19 +124,28 @@ private struct GateScreenLayout: View {
     }
 
     private var mainArea: some View {
-        HStack(alignment: .center, spacing: 22) {
-            CameraStageView(camera: camera, monitor: monitor)
+        HStack(alignment: .top, spacing: 22) {
+            leftColumn
                 .frame(maxWidth: .infinity)
 
             CameraControlPanel(camera: camera)
                 .frame(width: 340)
                 .frame(maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var leftColumn: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            HeaderView(language: language)
+
+            CameraStageView(camera: camera, monitor: monitor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
     }
 
     private func gateTopInset(for height: CGFloat) -> CGFloat {
-        max(CGFloat(64), min(CGFloat(86), height * CGFloat(0.062)))
+        max(CGFloat(34), min(CGFloat(56), height * CGFloat(0.062) - CGFloat(30)))
     }
 }
 
