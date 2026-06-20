@@ -159,6 +159,7 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
     case tuckPlancheHold
     case lSitHold
     case elbowLeverHold
+    case pikePushUps
 
     var id: Self { self }
 
@@ -173,6 +174,7 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .tuckPlancheHold: "Tuck Planche Hold"
         case .lSitHold: "L-sit Hold"
         case .elbowLeverHold: "Elbow Lever"
+        case .pikePushUps: "Pike Push-ups"
         }
     }
 
@@ -196,6 +198,8 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case (.lSitHold, .russian): "Уголок"
         case (.elbowLeverHold, .english): "Elbow Lever"
         case (.elbowLeverHold, .russian): "Локтевой рычаг"
+        case (.pikePushUps, .english): "Pike Push-ups"
+        case (.pikePushUps, .russian): "Пайк-отжимания"
         }
     }
 
@@ -210,11 +214,12 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .tuckPlancheHold: "figure.gymnastics"
         case .lSitHold: "figure.core.training"
         case .elbowLeverHold: "figure.gymnastics"
+        case .pikePushUps: "figure.gymnastics"
         }
     }
 
     var isExperimental: Bool {
-        self == .mountainClimbers || self == .tuckPlancheHold || self == .lSitHold || self == .elbowLeverHold
+        self == .mountainClimbers || self == .tuckPlancheHold || self == .lSitHold || self == .elbowLeverHold || self == .pikePushUps
     }
 
     var isTimed: Bool {
@@ -2208,7 +2213,7 @@ final class CameraModel: ObservableObject {
             case .extreme, .extremePlus:
                 reps = 30
             }
-        case .pushUps, .squats, .abs:
+        case .pushUps, .squats, .abs, .pikePushUps:
             switch difficulty {
             case .light:
                 reps = 10
@@ -2465,6 +2470,10 @@ final class CameraModel: ObservableObject {
         } else if selectedMode == .lSitHold {
             if currentPoseState == "lSitHold" {
                 coachingMessage = appLanguage == .russian ? "Держи уголок" : "Hold the L-sit"
+            } else if currentPoseState.contains("lift") {
+                coachingMessage = appLanguage == .russian ? "Подними ноги выше" : "Lift your legs higher"
+            } else if currentPoseState.contains("hips") {
+                coachingMessage = appLanguage == .russian ? "Оторви таз от пола" : "Lift your hips off the floor"
             } else if currentPoseState.contains("legs") {
                 coachingMessage = appLanguage == .russian ? "Выпрями ноги" : "Straighten your legs"
             } else if currentPoseState.contains("support") {
@@ -2481,6 +2490,18 @@ final class CameraModel: ObservableObject {
                 coachingMessage = appLanguage == .russian ? "Локти ближе к корпусу" : "Keep elbows close"
             } else {
                 coachingMessage = appLanguage == .russian ? "Встань в локтевой рычаг" : "Get into elbow lever"
+            }
+        } else if selectedMode == .pikePushUps {
+            if currentPoseState == PikePushUpPhase.pikeUp.rawValue {
+                coachingMessage = appLanguage == .russian ? "Держи таз выше" : "Keep your hips high"
+            } else if currentPoseState == PikePushUpPhase.pikeDown.rawValue {
+                coachingMessage = appLanguage == .russian ? "Опусти голову к полу" : "Lower your head toward the floor"
+            } else if currentPoseState.contains("hips") {
+                coachingMessage = appLanguage == .russian ? "Не опускай таз" : "Do not drop your hips"
+            } else if currentPoseState.contains("legs") {
+                coachingMessage = appLanguage == .russian ? "Выпрями ноги" : "Straighten your legs"
+            } else {
+                coachingMessage = appLanguage == .russian ? "Встань в пайк" : "Get into pike"
             }
         } else {
             coachingMessage = appLanguage == .russian ? "Кадр хороший" : "Good framing"
@@ -2637,7 +2658,7 @@ final class CameraModel: ObservableObject {
         guard !workoutCompletionRecorded else { return }
 
         switch selectedMode {
-        case .pushUps, .squats, .abs, .burpees, .mountainClimbers:
+        case .pushUps, .squats, .abs, .burpees, .mountainClimbers, .pikePushUps:
             guard repCount >= targetRepCount else { return }
             completeCurrentStep(amount: repCount)
         case .plank, .tuckPlancheHold, .lSitHold, .elbowLeverHold:
@@ -2896,6 +2917,9 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private let lSitArmStraightThreshold: CGFloat = 145
     private let lSitLegStraightThreshold: CGFloat = 145
     private let elbowLeverBodyStraightThreshold: CGFloat = 145
+    private let pikeExtendedThreshold: CGFloat = 145
+    private let pikeDownElbowMin: CGFloat = 55
+    private let pikeDownElbowMax: CGFloat = 120
 
     private var mode: ExerciseMode = .pushUps
     private var lastProcessedTime: CFTimeInterval = 0
@@ -2909,6 +2933,13 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private var burpeeLastHipY: CGFloat?
     private var mountainPhase: MountainClimberPhase = .plankReady
     private var lastMountainDriveSide: BodySide?
+    private var pikePhase: PikePushUpPhase = .pikeReady
+    private var pikeTopHeadY: CGFloat?
+    private var pikeTopShoulderY: CGFloat?
+    private var pikeTopElbowAngle: CGFloat?
+    private var pikeBottomHeadY: CGFloat?
+    private var pikeBottomShoulderY: CGFloat?
+    private var pikeBottomElbowAngle: CGFloat?
     private var countingEnabled = false
     private var diagnosticsWindowStart = CACurrentMediaTime()
     private var diagnosticsFramesSeen = 0
@@ -2972,6 +3003,13 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         burpeeLastHipY = nil
         mountainPhase = .plankReady
         lastMountainDriveSide = nil
+        pikePhase = .pikeReady
+        pikeTopHeadY = nil
+        pikeTopShoulderY = nil
+        pikeTopElbowAngle = nil
+        pikeBottomHeadY = nil
+        pikeBottomShoulderY = nil
+        pikeBottomElbowAngle = nil
     }
 
     func captureOutput(
@@ -3091,6 +3129,8 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             return isPlankFormValid(points: points)
         case .mountainClimbers:
             return isMountainClimberBaseValid(points: points)
+        case .pikePushUps:
+            return pikeTopPoseResult(points: points).isValid
         case .tuckPlancheHold:
             return isTuckPlancheValid(points: points)
         case .lSitHold:
@@ -3165,6 +3205,9 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         case .mountainClimbers:
             let counted = updateMountainClimberState(points: points)
             return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: mountainPhase.rawValue)
+        case .pikePushUps:
+            let counted = updatePikePushUpState(points: points)
+            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: pikePhase.rawValue)
         }
     }
 
@@ -3497,6 +3540,183 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         return kneePoints.contains { distance($0, shoulderCenter) / torsoReference <= tuckPlancheKneeToTorsoRatio }
     }
 
+    private func updatePikePushUpState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+        let top = pikeTopPoseResult(points: points)
+        let bottom = pikeBottomPoseResult(points: points)
+
+        if top.isValid {
+            let metrics = top.metrics
+            switch pikePhase {
+            case .pikeReady, .pikeBroken:
+                pikePhase = .pikeUp
+                pikeTopHeadY = metrics?.headY
+                pikeTopShoulderY = metrics?.shoulderY
+                pikeTopElbowAngle = metrics?.elbowAngle
+                return false
+            case .pikeDown:
+                guard pikeMovementWasMeaningful() else {
+                    pikePhase = .pikeUp
+                    pikeTopHeadY = metrics?.headY
+                    pikeTopShoulderY = metrics?.shoulderY
+                    pikeTopElbowAngle = metrics?.elbowAngle
+                    return false
+                }
+                repCount += 1
+                pikePhase = .pikeUp
+                pikeTopHeadY = metrics?.headY
+                pikeTopShoulderY = metrics?.shoulderY
+                pikeTopElbowAngle = metrics?.elbowAngle
+                return true
+            case .pikeUp:
+                pikeTopHeadY = metrics?.headY
+                pikeTopShoulderY = metrics?.shoulderY
+                pikeTopElbowAngle = metrics?.elbowAngle
+                return false
+            }
+        }
+
+        if bottom.isValid {
+            pikeBottomHeadY = bottom.metrics?.headY
+            pikeBottomShoulderY = bottom.metrics?.shoulderY
+            pikeBottomElbowAngle = bottom.metrics?.elbowAngle
+            pikePhase = .pikeDown
+            return false
+        }
+
+        if pikeTopPoseResult(points: points, allowBentArms: true).isValid {
+            pikePhase = .pikeReady
+        } else {
+            pikePhase = .pikeBroken
+        }
+        return false
+    }
+
+    private func pikeMovementWasMeaningful() -> Bool {
+        guard
+            let topHeadY = pikeTopHeadY,
+            let topShoulderY = pikeTopShoulderY,
+            let topElbowAngle = pikeTopElbowAngle,
+            let bottomHeadY = pikeBottomHeadY,
+            let bottomShoulderY = pikeBottomShoulderY,
+            let bottomElbowAngle = pikeBottomElbowAngle
+        else {
+            return true
+        }
+
+        let scale = max(0.04, abs(topShoulderY - topHeadY) * 3)
+        let headDrop = bottomHeadY - topHeadY
+        let shoulderDrop = bottomShoulderY - topShoulderY
+        let elbowChange = topElbowAngle - bottomElbowAngle
+        return headDrop >= scale * 0.12 || shoulderDrop >= scale * 0.10 || elbowChange >= 25
+    }
+
+    private func pikeTopPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], allowBentArms: Bool = false) -> (isValid: Bool, debugState: String, metrics: PikePoseMetrics?) {
+        guard let metrics = pikePoseMetrics(points: points) else {
+            return (false, PikePushUpPhase.pikeBroken.rawValue, nil)
+        }
+
+        guard metrics.hipsHigh else {
+            return (false, "pikeBroken hips", metrics)
+        }
+        guard metrics.legsStraight else {
+            return (false, "pikeBroken legs", metrics)
+        }
+        guard metrics.invertedV else {
+            return (false, PikePushUpPhase.pikeBroken.rawValue, metrics)
+        }
+        guard allowBentArms || metrics.armsStraight else {
+            return (false, PikePushUpPhase.pikeDown.rawValue, metrics)
+        }
+        guard metrics.supportLooksGood else {
+            return (false, PikePushUpPhase.pikeBroken.rawValue, metrics)
+        }
+        return (true, PikePushUpPhase.pikeUp.rawValue, metrics)
+    }
+
+    private func pikeBottomPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isValid: Bool, debugState: String, metrics: PikePoseMetrics?) {
+        guard let metrics = pikePoseMetrics(points: points) else {
+            return (false, PikePushUpPhase.pikeBroken.rawValue, nil)
+        }
+
+        guard metrics.hipsHigh else {
+            return (false, "pikeBroken hips", metrics)
+        }
+        guard metrics.legsStraight else {
+            return (false, "pikeBroken legs", metrics)
+        }
+        guard metrics.elbowsBent else {
+            return (false, PikePushUpPhase.pikeReady.rawValue, metrics)
+        }
+
+        let scale = max(0.04, metrics.torsoLength)
+        let headNearHands = metrics.headY >= metrics.wristY - scale * 0.25
+        let shouldersLowered = pikeTopShoulderY.map { metrics.shoulderY > $0 + scale * 0.08 } ?? true
+        guard headNearHands || shouldersLowered else {
+            return (false, PikePushUpPhase.pikeReady.rawValue, metrics)
+        }
+        return (true, PikePushUpPhase.pikeDown.rawValue, metrics)
+    }
+
+    private func pikePoseMetrics(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> PikePoseMetrics? {
+        guard
+            let shoulderCenter = averagePoint(points: points, joints: [.leftShoulder, .rightShoulder]),
+            let hipCenter = averagePoint(points: points, joints: [.leftHip, .rightHip]),
+            let wristCenter = averagePoint(points: points, joints: [.leftWrist, .rightWrist]),
+            let kneeCenter = averagePoint(points: points, joints: [.leftKnee, .rightKnee])
+        else {
+            return nil
+        }
+
+        let ankleCenter = averagePoint(points: points, joints: [.leftAnkle, .rightAnkle]) ?? kneeCenter
+        let headPoint = averagePoint(points: points, joints: [.nose, .neck]) ?? shoulderCenter
+        let torsoLength = max(0.04, distance(shoulderCenter, hipCenter))
+        let hipMargin = torsoLength * 0.15
+        let hipsHigh = hipCenter.y < shoulderCenter.y - hipMargin
+            && hipCenter.y < kneeCenter.y - hipMargin
+            && hipCenter.y < ankleCenter.y - hipMargin * 0.6
+
+        guard let elbowAngle = bestAngle(
+            points: points,
+            firstCandidates: [.leftShoulder, .rightShoulder],
+            middleCandidates: [.leftElbow, .rightElbow],
+            lastCandidates: [.leftWrist, .rightWrist]
+        ) else {
+            return nil
+        }
+
+        let kneeAngle = bestAngle(
+            points: points,
+            firstCandidates: [.leftHip, .rightHip],
+            middleCandidates: [.leftKnee, .rightKnee],
+            lastCandidates: [.leftAnkle, .rightAnkle]
+        ) ?? 180
+
+        let shoulderHipKnee = bestAngle(
+            points: points,
+            firstCandidates: [.leftShoulder, .rightShoulder],
+            middleCandidates: [.leftHip, .rightHip],
+            lastCandidates: [.leftKnee, .rightKnee]
+        ) ?? angle(first: shoulderCenter, middle: hipCenter, last: kneeCenter)
+
+        let wristShoulderDistance = abs(wristCenter.x - shoulderCenter.x)
+        let supportLooksGood = wristCenter.y > shoulderCenter.y - torsoLength * 0.15
+            && wristShoulderDistance / torsoLength <= 1.55
+
+        return PikePoseMetrics(
+            torsoLength: torsoLength,
+            headY: headPoint.y,
+            shoulderY: shoulderCenter.y,
+            wristY: wristCenter.y,
+            elbowAngle: elbowAngle,
+            hipsHigh: hipsHigh,
+            armsStraight: elbowAngle >= pikeExtendedThreshold,
+            elbowsBent: (pikeDownElbowMin...pikeDownElbowMax).contains(elbowAngle),
+            legsStraight: kneeAngle >= pikeExtendedThreshold,
+            invertedV: (45...115).contains(shoulderHipKnee),
+            supportLooksGood: supportLooksGood
+        )
+    }
+
     private func lSitPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isValid: Bool, debugState: String) {
         guard
             let shoulderCenter = averagePoint(points: points, joints: [.leftShoulder, .rightShoulder]),
@@ -3518,6 +3738,27 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         let wrists = [points[.leftWrist], points[.rightWrist]].compactMap(validPoint)
         guard !wrists.isEmpty, wrists.contains(where: { distance($0, hipCenter) / torsoLength <= 1.75 }) else {
             return (false, "lSitBroken support")
+        }
+        let averageWristY = wrists.map(\.y).reduce(0, +) / CGFloat(wrists.count)
+        let hipPoints = [points[.leftHip], points[.rightHip]].compactMap(validPoint)
+        let kneePoints = [points[.leftKnee], points[.rightKnee]].compactMap(validPoint)
+        let anklePoints = [points[.leftAnkle], points[.rightAnkle]].compactMap(validPoint)
+        guard !hipPoints.isEmpty, !kneePoints.isEmpty, !anklePoints.isEmpty else {
+            return (false, "lSitSetup")
+        }
+
+        let averageHipY = hipPoints.map(\.y).reduce(0, +) / CGFloat(hipPoints.count)
+        let averageKneeY = kneePoints.map(\.y).reduce(0, +) / CGFloat(kneePoints.count)
+        let averageAnkleY = anklePoints.map(\.y).reduce(0, +) / CGFloat(anklePoints.count)
+        let legLiftMargin = torsoLength * 0.12
+        let kneesAboveWrists = averageKneeY < averageWristY - legLiftMargin
+        let anklesAboveWrists = averageAnkleY < averageWristY - legLiftMargin
+        let hipsNotSittingLow = averageHipY < averageWristY + torsoLength * 0.08
+        guard hipsNotSittingLow else {
+            return (false, "lSitBroken hips")
+        }
+        guard kneesAboveWrists, anklesAboveWrists else {
+            return (false, "lSitBroken lift")
         }
 
         var straightArmCount = 0
@@ -3766,6 +4007,20 @@ private struct AbsMetrics {
     }
 }
 
+private struct PikePoseMetrics {
+    let torsoLength: CGFloat
+    let headY: CGFloat
+    let shoulderY: CGFloat
+    let wristY: CGFloat
+    let elbowAngle: CGFloat
+    let hipsHigh: Bool
+    let armsStraight: Bool
+    let elbowsBent: Bool
+    let legsStraight: Bool
+    let invertedV: Bool
+    let supportLooksGood: Bool
+}
+
 private enum ExercisePosition {
     case waiting
     case up
@@ -3787,6 +4042,13 @@ private enum MountainClimberPhase: String {
     case leftKneeDrive = "left knee drive"
     case rightKneeDrive = "right knee drive"
     case waitingForAlternation = "waiting for alternation"
+}
+
+private enum PikePushUpPhase: String {
+    case pikeReady = "pikeReady"
+    case pikeDown = "pikeDown"
+    case pikeUp = "pikeUp"
+    case pikeBroken = "pikeBroken"
 }
 
 private enum BodySide {
@@ -3978,7 +4240,8 @@ private final class VoiceCommandService {
             (.exercise(.mountainClimbers), latestKeywordPosition(in: exerciseText, keywords: ["mountain climbers", "climbers", "клаймберсы", "альпинист", "альпинисты"])),
             (.exercise(.tuckPlancheHold), latestKeywordPosition(in: exerciseText, keywords: ["tuck planche", "planche", "так планше", "так планч", "планше", "планч"])),
             (.exercise(.lSitHold), latestKeywordPosition(in: exerciseText, keywords: ["l sit", "l-sit", "lsit", "l sit hold", "уголок", "л сит", "эль сит"])),
-            (.exercise(.elbowLeverHold), latestKeywordPosition(in: exerciseText, keywords: ["elbow lever", "elbow lever hold", "локтевой рычаг", "рычаг на локтях"]))
+            (.exercise(.elbowLeverHold), latestKeywordPosition(in: exerciseText, keywords: ["elbow lever", "elbow lever hold", "локтевой рычаг", "рычаг на локтях"])),
+            (.exercise(.pikePushUps), latestKeywordPosition(in: exerciseText, keywords: ["pike pushups", "pike push-ups", "pike push up", "pike", "пайк отжимания", "пайк", "отжимания пайк"]))
         ]
 
         let exerciseMatch = exerciseMatches.compactMap({ command, position in
