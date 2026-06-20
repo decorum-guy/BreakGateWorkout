@@ -836,6 +836,8 @@ private struct MenuBarControlView: View {
                 MenuMetricCard(title: ExerciseMode.plank.title(language), value: "\(stats.totalPlankSeconds)", subtitle: L.t(.seconds, language), systemImage: ExerciseMode.plank.systemImage, color: .cyan)
                 MenuMetricCard(title: ExerciseMode.burpees.title(language), value: "\(stats.totalBurpees)", subtitle: L.t(.totalReps, language), systemImage: ExerciseMode.burpees.systemImage, color: .pink)
                 MenuMetricCard(title: ExerciseMode.mountainClimbers.title(language), value: "\(stats.totalMountainClimbers)", subtitle: L.t(.totalReps, language), systemImage: ExerciseMode.mountainClimbers.systemImage, color: .mint)
+                MenuMetricCard(title: ExerciseMode.lSitHold.title(language), value: "\(stats.totalLSitSeconds)", subtitle: L.t(.seconds, language), systemImage: ExerciseMode.lSitHold.systemImage, color: .indigo)
+                MenuMetricCard(title: ExerciseMode.elbowLeverHold.title(language), value: "\(stats.totalElbowLeverSeconds)", subtitle: L.t(.seconds, language), systemImage: ExerciseMode.elbowLeverHold.systemImage, color: .teal)
                 MenuMetricCard(title: L.t(.last, language), value: stats.lastWorkoutDescription(language), subtitle: L.t(.workout, language), systemImage: "calendar", color: .secondary)
             }
         }
@@ -1040,6 +1042,8 @@ private struct StatisticsShareSnapshot {
     let totalPlankSeconds: Int
     let totalBurpees: Int
     let totalMountainClimbers: Int
+    let totalLSitSeconds: Int
+    let totalElbowLeverSeconds: Int
     let lastWorkoutDescription: String
 }
 
@@ -1069,6 +1073,8 @@ private enum StatisticsShareService {
             totalPlankSeconds: stats.totalPlankSeconds,
             totalBurpees: stats.totalBurpees,
             totalMountainClimbers: stats.totalMountainClimbers,
+            totalLSitSeconds: stats.totalLSitSeconds,
+            totalElbowLeverSeconds: stats.totalElbowLeverSeconds,
             lastWorkoutDescription: stats.lastWorkoutDescription(language)
         )
 
@@ -1259,6 +1265,8 @@ private struct StatisticsShareCard: View {
                     ShareStatTile(mode: .plank, value: snapshot.totalPlankSeconds, subtitle: totalSecondsSubtitle, color: .cyan, language: language)
                     ShareStatTile(mode: .burpees, value: snapshot.totalBurpees, subtitle: L.t(.totalReps, language), color: .pink, language: language)
                     ShareStatTile(mode: .mountainClimbers, value: snapshot.totalMountainClimbers, subtitle: L.t(.totalReps, language), color: .mint, language: language)
+                    ShareStatTile(mode: .lSitHold, value: snapshot.totalLSitSeconds, subtitle: totalSecondsSubtitle, color: .indigo, language: language)
+                    ShareStatTile(mode: .elbowLeverHold, value: snapshot.totalElbowLeverSeconds, subtitle: totalSecondsSubtitle, color: .teal, language: language)
                 }
 
                 Spacer()
@@ -2283,7 +2291,7 @@ final class WorkoutSettingsStore: ObservableObject {
 
     private static func normalizedStep(_ step: WorkoutStep) -> WorkoutStep {
         if step.mode.isTimed {
-            let minimum = step.mode == .tuckPlancheHold ? 5 : 10
+            let minimum = (step.mode == .tuckPlancheHold || step.mode == .lSitHold || step.mode == .elbowLeverHold) ? 5 : 10
             return WorkoutStep(id: step.id, mode: step.mode, targetSeconds: max(minimum, step.targetSeconds ?? minimum))
         }
 
@@ -2577,6 +2585,8 @@ private struct AboutBreakGateView: View {
                     "Burpees start from standing and count only after a standing → low push-up → standing cycle.",
                     "Mountain Climbers start from plank and count one left-right knee-drive pair as one rep.",
                     "Experimental exercises can be enabled in Settings. Tuck Planche Hold waits for a stable two-second hold before its timer starts.",
+                    "L-sit Hold waits for a stable seated support position with straight legs before the timer starts.",
+                    "Elbow Lever waits for a stable bent-arm horizontal body line before the timer starts.",
                     "When the starting position is accepted, you hear a short tick and see Go!"
                 ]),
                 ("Difficulty", [
@@ -2641,6 +2651,8 @@ private struct AboutBreakGateView: View {
                     "Бёрпи стартуют из стойки и считаются только после цикла стойка → низкая фаза отжимания → стойка.",
                     "Альпинист стартует из планки и считает пару левое-правое подтягивание колена как один повтор.",
                     "Экспериментальные упражнения можно включить в настройках. Так планше сначала ждет стабильную фиксацию две секунды, потом запускает таймер.",
+                    "Уголок ждет устойчивую опору на руках с вытянутыми ногами.",
+                    "Локтевой рычаг ждет устойчивую горизонтальную линию тела на согнутых руках.",
                     "Когда исходная поза принята, прозвучит короткий сигнал и появится Начинай!"
                 ]),
                 ("Сложности", [
@@ -2918,8 +2930,8 @@ private struct WorkoutStepEditor: View {
                         get: { step.targetSeconds ?? defaultSeconds(for: step.mode) },
                         set: { step.targetSeconds = $0 }
                     ),
-                    range: step.mode == .tuckPlancheHold ? 5...60 : 10...300,
-                    step: step.mode == .tuckPlancheHold ? 1 : 5
+                    range: experimentalHoldModes.contains(step.mode) ? 5...60 : 10...300,
+                    step: experimentalHoldModes.contains(step.mode) ? 1 : 5
                 )
             } else {
                 TargetNumberEditor(
@@ -2942,7 +2954,11 @@ private struct WorkoutStepEditor: View {
     }
 
     private func defaultSeconds(for mode: ExerciseMode) -> Int {
-        mode == .tuckPlancheHold ? 5 : 90
+        experimentalHoldModes.contains(mode) ? 5 : 90
+    }
+
+    private var experimentalHoldModes: Set<ExerciseMode> {
+        [.tuckPlancheHold, .lSitHold, .elbowLeverHold]
     }
 
     private func defaultReps(for mode: ExerciseMode, difficulty: WorkoutDifficulty) -> Int {
@@ -2966,7 +2982,7 @@ private struct WorkoutStepEditor: View {
             case .medium: return 15
             case .hard, .extreme, .extremePlus: return 20
             }
-        case .plank, .tuckPlancheHold:
+        case .plank, .tuckPlancheHold, .lSitHold, .elbowLeverHold:
             return 20
         }
     }
@@ -3493,6 +3509,12 @@ final class WorkoutStats: ObservableObject {
     @Published private(set) var totalMountainClimbers: Int {
         didSet { save() }
     }
+    @Published private(set) var totalLSitSeconds: Int {
+        didSet { save() }
+    }
+    @Published private(set) var totalElbowLeverSeconds: Int {
+        didSet { save() }
+    }
     @Published private(set) var lastWorkoutDate: Date? {
         didSet { save() }
     }
@@ -3517,6 +3539,8 @@ final class WorkoutStats: ObservableObject {
     private let totalPlankSecondsKey = "BreakGateWorkout.totalPlankSeconds"
     private let totalBurpeesKey = "BreakGateWorkout.totalBurpees"
     private let totalMountainClimbersKey = "BreakGateWorkout.totalMountainClimbers"
+    private let totalLSitSecondsKey = "BreakGateWorkout.totalLSitSeconds"
+    private let totalElbowLeverSecondsKey = "BreakGateWorkout.totalElbowLeverSeconds"
     private let lastWorkoutDateKey = "BreakGateWorkout.lastWorkoutDate"
 
     init() {
@@ -3527,6 +3551,8 @@ final class WorkoutStats: ObservableObject {
         totalPlankSeconds = defaults.integer(forKey: totalPlankSecondsKey)
         totalBurpees = defaults.integer(forKey: totalBurpeesKey)
         totalMountainClimbers = defaults.integer(forKey: totalMountainClimbersKey)
+        totalLSitSeconds = defaults.integer(forKey: totalLSitSecondsKey)
+        totalElbowLeverSeconds = defaults.integer(forKey: totalElbowLeverSecondsKey)
         lastWorkoutDate = defaults.object(forKey: lastWorkoutDateKey) as? Date
     }
 
@@ -3554,6 +3580,10 @@ final class WorkoutStats: ObservableObject {
                 totalBurpees += step.targetReps ?? 0
             case .mountainClimbers:
                 totalMountainClimbers += step.targetReps ?? 0
+            case .lSitHold:
+                totalLSitSeconds += step.targetSeconds ?? 0
+            case .elbowLeverHold:
+                totalElbowLeverSeconds += step.targetSeconds ?? 0
             }
         }
     }
@@ -3566,6 +3596,8 @@ final class WorkoutStats: ObservableObject {
         totalPlankSeconds = 0
         totalBurpees = 0
         totalMountainClimbers = 0
+        totalLSitSeconds = 0
+        totalElbowLeverSeconds = 0
         lastWorkoutDate = nil
     }
 
@@ -3577,6 +3609,8 @@ final class WorkoutStats: ObservableObject {
         defaults.set(totalPlankSeconds, forKey: totalPlankSecondsKey)
         defaults.set(totalBurpees, forKey: totalBurpeesKey)
         defaults.set(totalMountainClimbers, forKey: totalMountainClimbersKey)
+        defaults.set(totalLSitSeconds, forKey: totalLSitSecondsKey)
+        defaults.set(totalElbowLeverSeconds, forKey: totalElbowLeverSecondsKey)
         defaults.set(lastWorkoutDate, forKey: lastWorkoutDateKey)
     }
 }

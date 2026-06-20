@@ -157,6 +157,8 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
     case burpees
     case mountainClimbers
     case tuckPlancheHold
+    case lSitHold
+    case elbowLeverHold
 
     var id: Self { self }
 
@@ -169,6 +171,8 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .burpees: "Burpees"
         case .mountainClimbers: "Mountain Climbers"
         case .tuckPlancheHold: "Tuck Planche Hold"
+        case .lSitHold: "L-sit Hold"
+        case .elbowLeverHold: "Elbow Lever"
         }
     }
 
@@ -188,6 +192,10 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case (.mountainClimbers, .russian): "Альпинист"
         case (.tuckPlancheHold, .english): "Tuck Planche Hold"
         case (.tuckPlancheHold, .russian): "Так планше"
+        case (.lSitHold, .english): "L-sit Hold"
+        case (.lSitHold, .russian): "Уголок"
+        case (.elbowLeverHold, .english): "Elbow Lever"
+        case (.elbowLeverHold, .russian): "Локтевой рычаг"
         }
     }
 
@@ -200,15 +208,17 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .burpees: "figure.highintensity.intervaltraining"
         case .mountainClimbers: "figure.climbing"
         case .tuckPlancheHold: "figure.gymnastics"
+        case .lSitHold: "figure.core.training"
+        case .elbowLeverHold: "figure.gymnastics"
         }
     }
 
     var isExperimental: Bool {
-        self == .mountainClimbers || self == .tuckPlancheHold
+        self == .mountainClimbers || self == .tuckPlancheHold || self == .lSitHold || self == .elbowLeverHold
     }
 
     var isTimed: Bool {
-        self == .plank || self == .tuckPlancheHold
+        self == .plank || self == .tuckPlancheHold || self == .lSitHold || self == .elbowLeverHold
     }
 }
 
@@ -1627,6 +1637,16 @@ final class CameraModel: ObservableObject {
                 ? (appLanguage == .russian ? "Держи так планше" : "Hold tuck planche")
                 : (appLanguage == .russian ? "Зафиксируй 2 секунды" : "Stabilize for 2 seconds")
         }
+        if selectedMode == .lSitHold {
+            return plankIsActive
+                ? (appLanguage == .russian ? "Держи уголок" : "Hold the L-sit")
+                : (appLanguage == .russian ? "Сядь в уголок" : "Get into L-sit")
+        }
+        if selectedMode == .elbowLeverHold {
+            return plankIsActive
+                ? (appLanguage == .russian ? "Держи рычаг" : "Hold the lever")
+                : (appLanguage == .russian ? "Встань в локтевой рычаг" : "Get into elbow lever")
+        }
 
         return currentTargetLabel
     }
@@ -1736,6 +1756,7 @@ final class CameraModel: ObservableObject {
     private var lastSoundedRepCount = 0
     private var lastFinalPlankSecondSound: Int?
     private var plankWasStable = false
+    private var lastTimedHoldDiagnosticState: String?
     private var lastCelebratedRepCount = 0
     private var lastCelebratedPlankBucket = 0
     private var celebrationClearTask: Task<Void, Never>?
@@ -2150,7 +2171,7 @@ final class CameraModel: ObservableObject {
     private func defaultStep(mode: ExerciseMode, difficulty: WorkoutDifficulty) -> WorkoutStep {
         if mode.isTimed {
             let seconds: Int
-            if mode == .tuckPlancheHold {
+            if mode == .tuckPlancheHold || mode == .lSitHold || mode == .elbowLeverHold {
                 seconds = 5
             } else {
                 switch difficulty {
@@ -2196,7 +2217,7 @@ final class CameraModel: ObservableObject {
             case .hard, .extreme, .extremePlus:
                 reps = 20
             }
-        case .plank, .tuckPlancheHold:
+        case .plank, .tuckPlancheHold, .lSitHold, .elbowLeverHold:
             reps = 20
         }
         return WorkoutStep(mode: mode, targetReps: reps)
@@ -2217,6 +2238,7 @@ final class CameraModel: ObservableObject {
         lastSoundedRepCount = 0
         lastFinalPlankSecondSound = nil
         plankWasStable = false
+        lastTimedHoldDiagnosticState = nil
         lastCelebratedRepCount = 0
         lastCelebratedPlankBucket = 0
         exerciseStartReadyAt = Date().addingTimeInterval(exerciseStartDelay)
@@ -2298,9 +2320,11 @@ final class CameraModel: ObservableObject {
 
     private func updateTimedHoldState(with update: PoseDetectionUpdate) {
         let now = Date()
-        let requiredConfidence: Float = selectedMode == .tuckPlancheHold ? 0.30 : 0.22
-        let requiredStableDuration: TimeInterval = selectedMode == .tuckPlancheHold ? 2.0 : 0
+        let isExperimentalHold = selectedMode == .tuckPlancheHold || selectedMode == .lSitHold || selectedMode == .elbowLeverHold
+        let requiredConfidence: Float = isExperimentalHold ? 0.30 : 0.22
+        let requiredStableDuration: TimeInterval = isExperimentalHold ? 2.0 : 0
         let isPoseActive = update.isPersonDetected && update.confidence >= requiredConfidence && update.workoutState == .plankActive
+        logTimedHoldStateIfNeeded(isPoseActive ? "valid \(update.debugState)" : "invalid \(update.debugState)")
 
         if !isPoseActive {
             if selectedMode == .plank && plankWasStable && plankTimeRemaining > 0 {
@@ -2347,6 +2371,7 @@ final class CameraModel: ObservableObject {
             lastPlankTick = now
             currentWorkoutState = .plankActive
             currentPoseState = update.debugState
+            logTimedHoldStateIfNeeded("timer started")
             return
         }
 
@@ -2364,6 +2389,14 @@ final class CameraModel: ObservableObject {
             celebratePlankProgressIfNeeded()
         }
         checkWorkoutCompletion()
+    }
+
+    private func logTimedHoldStateIfNeeded(_ state: String) {
+        guard selectedMode == .lSitHold || selectedMode == .elbowLeverHold else { return }
+        let diagnosticState = "\(selectedMode.rawValue):\(state)"
+        guard lastTimedHoldDiagnosticState != diagnosticState else { return }
+        lastTimedHoldDiagnosticState = diagnosticState
+        DiagnosticLog.log("\(selectedMode.rawValue) \(state)")
     }
 
     private func updateCoachingMessage() {
@@ -2428,6 +2461,26 @@ final class CameraModel: ObservableObject {
                 coachingMessage = appLanguage == .russian ? "Держи планку" : "Hold plank"
             default:
                 coachingMessage = appLanguage == .russian ? "Держи корпус" : "Keep your core tight"
+            }
+        } else if selectedMode == .lSitHold {
+            if currentPoseState == "lSitHold" {
+                coachingMessage = appLanguage == .russian ? "Держи уголок" : "Hold the L-sit"
+            } else if currentPoseState.contains("legs") {
+                coachingMessage = appLanguage == .russian ? "Выпрями ноги" : "Straighten your legs"
+            } else if currentPoseState.contains("support") {
+                coachingMessage = appLanguage == .russian ? "Дави руками в пол" : "Press through your hands"
+            } else {
+                coachingMessage = appLanguage == .russian ? "Сядь в уголок" : "Get into L-sit"
+            }
+        } else if selectedMode == .elbowLeverHold {
+            if currentPoseState == "elbowLeverHold" {
+                coachingMessage = appLanguage == .russian ? "Держи рычаг" : "Hold the lever"
+            } else if currentPoseState.contains("line") {
+                coachingMessage = appLanguage == .russian ? "Выпрями тело" : "Straighten your body"
+            } else if currentPoseState.contains("support") {
+                coachingMessage = appLanguage == .russian ? "Локти ближе к корпусу" : "Keep elbows close"
+            } else {
+                coachingMessage = appLanguage == .russian ? "Встань в локтевой рычаг" : "Get into elbow lever"
             }
         } else {
             coachingMessage = appLanguage == .russian ? "Кадр хороший" : "Good framing"
@@ -2587,8 +2640,11 @@ final class CameraModel: ObservableObject {
         case .pushUps, .squats, .abs, .burpees, .mountainClimbers:
             guard repCount >= targetRepCount else { return }
             completeCurrentStep(amount: repCount)
-        case .plank, .tuckPlancheHold:
+        case .plank, .tuckPlancheHold, .lSitHold, .elbowLeverHold:
             guard plankTimeRemaining <= 0, plankIsActive else { return }
+            if selectedMode == .lSitHold || selectedMode == .elbowLeverHold {
+                DiagnosticLog.log("\(selectedMode.rawValue) hold completed")
+            }
             completeCurrentStep(amount: Int(plankDuration.rounded()))
         }
     }
@@ -2837,6 +2893,9 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private let mountainClimberKneeToShoulderRatio: CGFloat = 0.74
     private let tuckPlancheArmStraightThreshold: CGFloat = 150
     private let tuckPlancheKneeToTorsoRatio: CGFloat = 1.35
+    private let lSitArmStraightThreshold: CGFloat = 145
+    private let lSitLegStraightThreshold: CGFloat = 145
+    private let elbowLeverBodyStraightThreshold: CGFloat = 145
 
     private var mode: ExerciseMode = .pushUps
     private var lastProcessedTime: CFTimeInterval = 0
@@ -3034,6 +3093,10 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             return isMountainClimberBaseValid(points: points)
         case .tuckPlancheHold:
             return isTuckPlancheValid(points: points)
+        case .lSitHold:
+            return lSitPoseResult(points: points).isValid
+        case .elbowLeverHold:
+            return elbowLeverPoseResult(points: points).isValid
         case .burpees:
             return isStandingFormValid(points: points)
         case .squats:
@@ -3090,6 +3153,12 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         case .tuckPlancheHold:
             let isValid = isTuckPlancheValid(points: points)
             return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "tuck planche hold" : "tuck planche setup")
+        case .lSitHold:
+            let result = lSitPoseResult(points: points)
+            return PoseStateResult(state: result.isValid ? .plankActive : .plankBroken, debugState: result.debugState)
+        case .elbowLeverHold:
+            let result = elbowLeverPoseResult(points: points)
+            return PoseStateResult(state: result.isValid ? .plankActive : .plankBroken, debugState: result.debugState)
         case .burpees:
             let counted = updateBurpeeState(points: points)
             return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: burpeePhase.rawValue)
@@ -3426,6 +3495,139 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         let shoulderCenter = CGPoint(x: (leftShoulder.x + rightShoulder.x) / 2, y: (leftShoulder.y + rightShoulder.y) / 2)
         let torsoReference = max(0.01, distance(shoulderCenter, CGPoint(x: (leftElbow.x + rightElbow.x) / 2, y: (leftElbow.y + rightElbow.y) / 2)))
         return kneePoints.contains { distance($0, shoulderCenter) / torsoReference <= tuckPlancheKneeToTorsoRatio }
+    }
+
+    private func lSitPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isValid: Bool, debugState: String) {
+        guard
+            let shoulderCenter = averagePoint(points: points, joints: [.leftShoulder, .rightShoulder]),
+            let hipCenter = averagePoint(points: points, joints: [.leftHip, .rightHip])
+        else {
+            return (false, "lSitSetup")
+        }
+
+        if isPlankFormValid(points: points) {
+            return (false, "lSitBroken support")
+        }
+
+        let torsoLength = max(0.04, distance(shoulderCenter, hipCenter))
+        let torsoUprightEnough = shoulderCenter.y > hipCenter.y + 0.04
+        guard torsoUprightEnough else {
+            return (false, "lSitBroken support")
+        }
+
+        let wrists = [points[.leftWrist], points[.rightWrist]].compactMap(validPoint)
+        guard !wrists.isEmpty, wrists.contains(where: { distance($0, hipCenter) / torsoLength <= 1.75 }) else {
+            return (false, "lSitBroken support")
+        }
+
+        var straightArmCount = 0
+        var straightLegCount = 0
+        var lAngleCount = 0
+        var legsForwardCount = 0
+
+        let sides: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
+            (.leftShoulder, .leftElbow, .leftWrist, .leftHip, .leftKnee, .leftAnkle),
+            (.rightShoulder, .rightElbow, .rightWrist, .rightHip, .rightKnee, .rightAnkle)
+        ]
+
+        for side in sides {
+            if
+                let shoulder = validPoint(points[side.0]),
+                let elbow = validPoint(points[side.1]),
+                let wrist = validPoint(points[side.2]),
+                angle(first: shoulder, middle: elbow, last: wrist) >= lSitArmStraightThreshold
+            {
+                straightArmCount += 1
+            }
+
+            guard
+                let hip = validPoint(points[side.3]),
+                let knee = validPoint(points[side.4]),
+                let ankle = validPoint(points[side.5])
+            else {
+                continue
+            }
+
+            if angle(first: hip, middle: knee, last: ankle) >= lSitLegStraightThreshold {
+                straightLegCount += 1
+            }
+
+            let hipAngle = angle(first: shoulderCenter, middle: hip, last: knee)
+            if (60...120).contains(hipAngle) {
+                lAngleCount += 1
+            }
+
+            if abs(ankle.x - hip.x) >= 0.10 || abs(knee.x - hip.x) >= 0.08 {
+                legsForwardCount += 1
+            }
+        }
+
+        guard straightArmCount >= 1 else { return (false, "lSitBroken support") }
+        guard straightLegCount >= 1 else { return (false, "lSitBroken legs") }
+        guard lAngleCount >= 1, legsForwardCount >= 1 else { return (false, "lSitSetup") }
+        return (true, "lSitHold")
+    }
+
+    private func elbowLeverPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isValid: Bool, debugState: String) {
+        guard
+            let shoulderCenter = averagePoint(points: points, joints: [.leftShoulder, .rightShoulder]),
+            let hipCenter = averagePoint(points: points, joints: [.leftHip, .rightHip])
+        else {
+            return (false, "elbowLeverSetup")
+        }
+
+        let torsoLength = max(0.04, distance(shoulderCenter, hipCenter))
+        var bentArmCount = 0
+        var elbowSupportCount = 0
+        var straightBodyCount = 0
+        var bodyYValues: [CGFloat] = [shoulderCenter.y, hipCenter.y]
+
+        let sides: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
+            (.leftShoulder, .leftElbow, .leftWrist, .leftHip, .leftKnee, .leftAnkle),
+            (.rightShoulder, .rightElbow, .rightWrist, .rightHip, .rightKnee, .rightAnkle)
+        ]
+
+        for side in sides {
+            if
+                let shoulder = validPoint(points[side.0]),
+                let elbow = validPoint(points[side.1]),
+                let wrist = validPoint(points[side.2])
+            {
+                let armAngle = angle(first: shoulder, middle: elbow, last: wrist)
+                if (55...120).contains(armAngle) {
+                    bentArmCount += 1
+                }
+
+                if distance(elbow, hipCenter) / torsoLength <= 1.35 || distance(elbow, shoulderCenter) / torsoLength <= 1.2 {
+                    elbowSupportCount += 1
+                }
+            }
+
+            guard
+                let shoulder = validPoint(points[side.0]),
+                let hip = validPoint(points[side.3]),
+                let knee = validPoint(points[side.4]),
+                let ankle = validPoint(points[side.5])
+            else {
+                continue
+            }
+
+            let shoulderHipKnee = angle(first: shoulder, middle: hip, last: knee)
+            let hipKneeAnkle = angle(first: hip, middle: knee, last: ankle)
+            if shoulderHipKnee >= elbowLeverBodyStraightThreshold && hipKneeAnkle >= elbowLeverBodyStraightThreshold {
+                straightBodyCount += 1
+            }
+            bodyYValues.append(contentsOf: [knee.y, ankle.y])
+        }
+
+        let ySpread = (bodyYValues.max() ?? 0) - (bodyYValues.min() ?? 0)
+        guard straightBodyCount >= 1, ySpread <= 0.22 else {
+            return (false, "elbowLeverBroken line")
+        }
+        guard bentArmCount >= 1, elbowSupportCount >= 1 else {
+            return (false, "elbowLeverBroken support")
+        }
+        return (true, "elbowLeverHold")
     }
 
     private func distance(_ first: CGPoint, _ second: CGPoint) -> CGFloat {
@@ -3774,7 +3976,9 @@ private final class VoiceCommandService {
             (.exercise(.abs), latestKeywordPosition(in: exerciseText, keywords: ["abs", "sit-up", "situps", "sit ups", "press", "пресс"])),
             (.exercise(.burpees), latestKeywordPosition(in: exerciseText, keywords: ["burpees", "burpee", "берпи", "бёрпи"])),
             (.exercise(.mountainClimbers), latestKeywordPosition(in: exerciseText, keywords: ["mountain climbers", "climbers", "клаймберсы", "альпинист", "альпинисты"])),
-            (.exercise(.tuckPlancheHold), latestKeywordPosition(in: exerciseText, keywords: ["tuck planche", "planche", "так планше", "так планч", "планше", "планч"]))
+            (.exercise(.tuckPlancheHold), latestKeywordPosition(in: exerciseText, keywords: ["tuck planche", "planche", "так планше", "так планч", "планше", "планч"])),
+            (.exercise(.lSitHold), latestKeywordPosition(in: exerciseText, keywords: ["l sit", "l-sit", "lsit", "l sit hold", "уголок", "л сит", "эль сит"])),
+            (.exercise(.elbowLeverHold), latestKeywordPosition(in: exerciseText, keywords: ["elbow lever", "elbow lever hold", "локтевой рычаг", "рычаг на локтях"]))
         ]
 
         let exerciseMatch = exerciseMatches.compactMap({ command, position in
