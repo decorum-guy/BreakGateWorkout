@@ -394,14 +394,19 @@ private struct MenuBarControlView: View {
     }
 
     private var activeGateMenuHeight: CGFloat {
+        170 + CGFloat(max(0, estimatedPlanSummaryLines - 1)) * 18
+    }
+
+    private var estimatedPlanSummaryLines: Int {
+        let summaryLength = settings.plan.summary(language).count
         let stepCount = settings.plan.steps.count
-        if stepCount <= 1 {
-            return 170
+        if stepCount <= 1 && summaryLength <= 34 {
+            return 1
         }
-        if stepCount <= 3 {
-            return 184
+        if stepCount <= 3 && summaryLength <= 74 {
+            return 2
         }
-        return 206
+        return min(4, max(2, Int(ceil(Double(summaryLength) / 52.0))))
     }
 
     @ViewBuilder
@@ -525,7 +530,8 @@ private struct MenuBarControlView: View {
 
                 Text(settings.plan.summary(language))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .lineLimit(3)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
             .menuPanelCard(accent: .orange)
@@ -803,7 +809,8 @@ private struct MenuBarControlView: View {
 
             Text(settings.plan.summary(language))
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .lineLimit(3)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(rewardSummary)
                 .font(.caption)
