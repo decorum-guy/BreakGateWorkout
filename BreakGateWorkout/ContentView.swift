@@ -1134,19 +1134,23 @@ private struct StatusStack: View {
     var body: some View {
         VStack(spacing: 8) {
             if camera.statusIsError {
-                StatusRow(title: camera.appLanguage == .russian ? "Камера недоступна" : "No Camera Available", systemImage: "xmark.circle.fill", color: .red)
+                StatusRow(title: camera.appLanguage == .russian ? "Камера недоступна" : "Camera unavailable", systemImage: "xmark.circle.fill", color: .red)
             } else if camera.isSwitchingCamera {
-                StatusRow(title: camera.appLanguage == .russian ? "Переключаю камеру" : "Switching Camera", systemImage: "arrow.triangle.2.circlepath", color: .yellow)
+                StatusRow(title: camera.appLanguage == .russian ? "Подключение камеры…" : "Connecting camera…", systemImage: "arrow.triangle.2.circlepath", color: .yellow)
             } else if camera.session != nil {
-                StatusRow(title: camera.appLanguage == .russian ? "Камера подключена" : "Camera Connected", systemImage: "checkmark.circle.fill", color: .green)
+                StatusRow(title: camera.appLanguage == .russian ? "Камера готова" : "Camera ready", systemImage: "checkmark.circle.fill", color: .green)
             } else {
-                StatusRow(title: camera.appLanguage == .russian ? "Загружаю камеру" : "Loading Camera", systemImage: "circle.dotted", color: .secondary)
+                StatusRow(title: camera.appLanguage == .russian ? "Подключение камеры…" : "Connecting camera…", systemImage: "circle.dotted", color: .secondary)
             }
 
             StatusRow(
-                title: camera.hasIPhoneCamera
-                    ? (camera.appLanguage == .russian ? "iPhone Continuity найден" : "iPhone Continuity Detected")
-                    : (camera.appLanguage == .russian ? "iPhone Continuity не найден" : "iPhone Continuity Not Found"),
+                title: camera.selectedCameraStatusTitle,
+                systemImage: camera.selectedDeviceIsIPhone ? "iphone.circle.fill" : "web.camera.fill",
+                color: camera.selectedDeviceIsIPhone ? .blue : .secondary
+            )
+
+            StatusRow(
+                title: camera.continuityAvailabilityTitle,
                 systemImage: camera.hasIPhoneCamera ? "iphone.circle.fill" : "iphone.slash",
                 color: camera.hasIPhoneCamera ? .blue : .secondary
             )
@@ -1549,6 +1553,15 @@ final class SoundFeedbackService {
 @MainActor
 final class CameraModel: ObservableObject {
     static let isEmergencyUnlockEnabled = true
+    private enum PreferredCameraKind: String {
+        case mac
+        case continuity
+    }
+
+    private enum CameraDefaultsKey {
+        static let preferredKind = "BreakGateWorkout.camera.preferredKind"
+        static let selectedDeviceID = "BreakGateWorkout.camera.selectedDeviceID"
+    }
 
     @Published private(set) var session: AVCaptureSession?
     @Published private(set) var devices: [CameraDeviceInfo] = []
@@ -1608,6 +1621,22 @@ final class CameraModel: ObservableObject {
 
     var selectedDeviceIsIPhone: Bool {
         devices.first { $0.id == selectedDeviceID }?.isContinuityCamera ?? false
+    }
+
+    var selectedCameraStatusTitle: String {
+        if statusIsError || session == nil {
+            return appLanguage == .russian ? "Камера недоступна" : "Camera unavailable"
+        }
+
+        return selectedDeviceIsIPhone
+            ? (appLanguage == .russian ? "Continuity Camera" : "Continuity Camera")
+            : (appLanguage == .russian ? "Камера Mac" : "Mac camera")
+    }
+
+    var continuityAvailabilityTitle: String {
+        hasIPhoneCamera
+            ? (appLanguage == .russian ? "iPhone найден как Continuity Camera" : "iPhone found as Continuity Camera")
+            : (appLanguage == .russian ? "Continuity Camera недоступна" : "Continuity Camera unavailable")
     }
 
     var formattedPlankTime: String {
@@ -1754,6 +1783,7 @@ final class CameraModel: ObservableObject {
     private let poseDetectionService = PoseDetectionService()
     private let soundFeedback = SoundFeedbackService.shared
     private let voiceCommandService = VoiceCommandService()
+    private let userDefaults = UserDefaults.standard
     private var targetRepCount = 20
     private var captureDevices: [AVCaptureDevice] = []
     private var lastPlankTick: Date?
@@ -1781,6 +1811,30 @@ final class CameraModel: ObservableObject {
 
     private var startingPoseConfidenceThreshold: Float {
         selectedMode == .plank ? 0.22 : 0.34
+    }
+
+    private var preferredCameraKind: PreferredCameraKind {
+        get {
+            guard let rawValue = userDefaults.string(forKey: CameraDefaultsKey.preferredKind),
+                  let kind = PreferredCameraKind(rawValue: rawValue) else {
+                return .mac
+            }
+            return kind
+        }
+        set {
+            userDefaults.set(newValue.rawValue, forKey: CameraDefaultsKey.preferredKind)
+        }
+    }
+
+    private var persistedSelectedDeviceID: String? {
+        get { userDefaults.string(forKey: CameraDefaultsKey.selectedDeviceID) }
+        set {
+            if let newValue {
+                userDefaults.set(newValue, forKey: CameraDefaultsKey.selectedDeviceID)
+            } else {
+                userDefaults.removeObject(forKey: CameraDefaultsKey.selectedDeviceID)
+            }
+        }
     }
 
     init() {
@@ -1817,9 +1871,7 @@ final class CameraModel: ObservableObject {
             return
         }
 
-        let device = selectedDeviceID.flatMap { id in
-            captureDevices.first(where: { $0.uniqueID == id })
-        } ?? preferredMacCamera()
+        let device = restoredPreferredDevice()
 
         guard let device else {
             DiagnosticLog.log("CameraModel.start stopped: no camera available")
@@ -1841,8 +1893,6 @@ final class CameraModel: ObservableObject {
         poseDetectionService.reset()
         voiceCommandService.stop()
         session = nil
-        selectedDeviceID = nil
-        selectedCameraName = "None"
         isSwitchingCamera = false
         hasReceivedCameraFrame = false
         resetPoseState()
@@ -1878,6 +1928,7 @@ final class CameraModel: ObservableObject {
 
     func selectMacCamera() {
         refreshDevices()
+        preferredCameraKind = .mac
         guard let device = preferredMacCamera() else {
             clearPreview(message: appLanguage == .russian ? "Mac камера недоступна." : "No Mac camera is available.", isError: true)
             return
@@ -1887,8 +1938,9 @@ final class CameraModel: ObservableObject {
 
     func selectIPhoneCamera() {
         refreshDevices()
+        preferredCameraKind = .continuity
         guard let device = preferredIPhoneCamera() else {
-            guard let fallback = preferredMacCamera() else {
+            guard let fallback = fallbackForMissingPreferredCamera(kind: .continuity) else {
                 clearPreview(message: appLanguage == .russian ? "iPhone Continuity Camera недоступна." : "iPhone Continuity Camera is not available.", isError: true)
                 return
             }
@@ -1906,7 +1958,7 @@ final class CameraModel: ObservableObject {
     func selectCamera(id: String) {
         refreshDevices()
         guard let device = captureDevices.first(where: { $0.uniqueID == id }) else {
-            guard let fallback = preferredMacCamera() else {
+            guard let fallback = fallbackForMissingPreferredCamera(kind: preferredCameraKind) else {
                 clearPreview(message: appLanguage == .russian ? "Выбранная камера больше недоступна." : "Selected camera is no longer available.", isError: true)
                 return
             }
@@ -1918,6 +1970,7 @@ final class CameraModel: ObservableObject {
             configureCamera(fallback, allowFallback: false)
             return
         }
+        preferredCameraKind = isIPhoneCamera(device) ? .continuity : .mac
         configureCamera(device)
     }
 
@@ -2084,6 +2137,7 @@ final class CameraModel: ObservableObject {
     }
 
     private func refreshDevices() {
+        print("BreakGateWorkout camera: discovery started")
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [
                 .builtInWideAngleCamera,
@@ -2110,15 +2164,17 @@ final class CameraModel: ObservableObject {
         hasIPhoneCamera = captureDevices.contains(where: isIPhoneCamera)
         hasMacCamera = preferredMacCamera() != nil
 
-        print("BreakGateWorkout camera discovery: \(captureDevices.count) video device(s)")
+        print("BreakGateWorkout camera: found devices count=\(captureDevices.count)")
         for device in captureDevices {
-            print("BreakGateWorkout camera device: name=\(device.localizedName), deviceType=\(device.deviceType.rawValue), localizedName=\(device.localizedName), isContinuityCamera=\(device.isContinuityCamera)")
+            print("BreakGateWorkout camera: device name=\(device.localizedName) localizedName=\(device.localizedName) uniqueID=\(device.uniqueID) type=\(device.deviceType.rawValue) continuity=\(isIPhoneCamera(device))")
         }
-        print("BreakGateWorkout iPhone Continuity Camera detected: \(hasIPhoneCamera)")
+        print("BreakGateWorkout camera: continuity available=\(hasIPhoneCamera) mac available=\(hasMacCamera)")
     }
 
     private func preferredMacCamera() -> AVCaptureDevice? {
-        captureDevices.first { !isIPhoneCamera($0) } ?? captureDevices.first
+        captureDevices.first(where: isBuiltInMacCamera) ??
+        captureDevices.first(where: { !isIPhoneCamera($0) }) ??
+        captureDevices.first
     }
 
     private func preferredIPhoneCamera() -> AVCaptureDevice? {
@@ -2126,11 +2182,48 @@ final class CameraModel: ObservableObject {
     }
 
     private func fallbackCamera(excluding device: AVCaptureDevice) -> AVCaptureDevice? {
-        if let macCamera = preferredMacCamera(), macCamera.uniqueID != device.uniqueID {
-            return macCamera
+        let preferredFallback = fallbackForMissingPreferredCamera(kind: preferredCameraKind)
+        if let preferredFallback, preferredFallback.uniqueID != device.uniqueID {
+            return preferredFallback
         }
 
         return captureDevices.first(where: { $0.uniqueID != device.uniqueID })
+    }
+
+    private func fallbackForMissingPreferredCamera(kind: PreferredCameraKind) -> AVCaptureDevice? {
+        switch kind {
+        case .continuity:
+            return preferredIPhoneCamera() ?? preferredMacCamera() ?? captureDevices.first
+        case .mac:
+            return preferredMacCamera() ?? preferredIPhoneCamera() ?? captureDevices.first
+        }
+    }
+
+    private func restoredPreferredDevice() -> AVCaptureDevice? {
+        if let selectedDeviceID,
+           let selectedDevice = captureDevices.first(where: { $0.uniqueID == selectedDeviceID }) {
+            print("BreakGateWorkout camera: restoring in-memory device uniqueID=\(selectedDeviceID)")
+            return selectedDevice
+        }
+
+        if let persistedSelectedDeviceID,
+           let persistedDevice = captureDevices.first(where: { $0.uniqueID == persistedSelectedDeviceID }) {
+            print("BreakGateWorkout camera: restoring saved device uniqueID=\(persistedSelectedDeviceID)")
+            selectedDeviceID = persistedSelectedDeviceID
+            return persistedDevice
+        }
+
+        let fallback = fallbackForMissingPreferredCamera(kind: preferredCameraKind)
+        if let fallback {
+            print("BreakGateWorkout camera: restoring preferred kind=\(preferredCameraKind.rawValue) fallback device=\(fallback.localizedName)")
+        } else {
+            print("BreakGateWorkout camera: no device available for preferred kind=\(preferredCameraKind.rawValue)")
+        }
+        return fallback
+    }
+
+    private func isBuiltInMacCamera(_ device: AVCaptureDevice) -> Bool {
+        !isIPhoneCamera(device) && device.deviceType == .builtInWideAngleCamera
     }
 
     private func isIPhoneCamera(_ device: AVCaptureDevice) -> Bool {
@@ -2141,10 +2234,13 @@ final class CameraModel: ObservableObject {
     private func configureCamera(_ device: AVCaptureDevice, allowFallback: Bool = true) {
         let deviceName = device.localizedName
         DiagnosticLog.log("CameraModel.configureCamera device=\(deviceName)")
+        print("BreakGateWorkout camera: selecting device name=\(deviceName) uniqueID=\(device.uniqueID) continuity=\(isIPhoneCamera(device))")
         selectedDeviceID = device.uniqueID
+        persistedSelectedDeviceID = device.uniqueID
+        preferredCameraKind = isIPhoneCamera(device) ? .continuity : .mac
         selectedCameraName = deviceName
         updateZoomLimits(for: device)
-        statusMessage = appLanguage == .russian ? "Запускаю \(deviceName)..." : "Starting \(deviceName)..."
+        statusMessage = appLanguage == .russian ? "Подключение камеры…" : "Connecting camera…"
         statusIsError = false
         isSwitchingCamera = true
         hasReceivedCameraFrame = false
@@ -2162,11 +2258,14 @@ final class CameraModel: ObservableObject {
             switch result {
             case .success(let newSession):
                 DiagnosticLog.log("CameraModel.configureCamera success device=\(deviceName)")
+                print("BreakGateWorkout camera: session started device=\(deviceName) uniqueID=\(device.uniqueID) continuity=\(self.isIPhoneCamera(device))")
                 self.session = newSession
                 self.selectedDeviceID = device.uniqueID
                 self.selectedCameraName = deviceName
                 self.setZoomFactor(1)
-                self.statusMessage = self.appLanguage == .russian ? "Камера работает: \(deviceName)" : "Camera running: \(deviceName)"
+                self.statusMessage = self.isIPhoneCamera(device)
+                    ? (self.appLanguage == .russian ? "Continuity Camera: \(deviceName)" : "Continuity Camera: \(deviceName)")
+                    : (self.appLanguage == .russian ? "Камера Mac: \(deviceName)" : "Mac camera: \(deviceName)")
                 self.statusIsError = false
                 self.isSwitchingCamera = false
             case .failure(let error):
@@ -2183,6 +2282,7 @@ final class CameraModel: ObservableObject {
                 }
 
                 self.session = nil
+                print("BreakGateWorkout camera: session failed device=\(deviceName) error=\(error.localizedDescription)")
                 self.statusMessage = self.appLanguage == .russian ? "Не удалось запустить камеру: \(error.localizedDescription)" : "Camera could not start: \(error.localizedDescription)"
                 self.statusIsError = true
                 self.isSwitchingCamera = false
@@ -2195,8 +2295,7 @@ final class CameraModel: ObservableObject {
         sessionController.stop()
         poseDetectionService.reset()
         session = nil
-        selectedDeviceID = nil
-        selectedCameraName = "None"
+        selectedCameraName = appLanguage == .russian ? "Камера недоступна" : "Camera unavailable"
         statusMessage = message
         statusIsError = isError
         isSwitchingCamera = false
@@ -2816,6 +2915,7 @@ private final class CameraSessionController: @unchecked Sendable {
             guard let self else { return }
 
             DiagnosticLog.log("CameraSessionController.configure requested device=\(device.localizedName)")
+            print("BreakGateWorkout camera: configure session requested device=\(device.localizedName) uniqueID=\(device.uniqueID)")
             self.stopCurrentSession()
 
             let newSession = AVCaptureSession()
@@ -2919,6 +3019,10 @@ private final class CameraSessionController: @unchecked Sendable {
         guard let session = currentSession else {
             DiagnosticLog.log("CameraSessionController.stopCurrentSession no active session")
             return
+        }
+
+        if let currentDevice {
+            print("BreakGateWorkout camera: stopping previous session device=\(currentDevice.localizedName) uniqueID=\(currentDevice.uniqueID)")
         }
 
         if session.isRunning {
