@@ -7,9 +7,54 @@
 import AppKit
 import Combine
 import CoreGraphics
+import MultipeerConnectivity
 import Speech
 import SwiftUI
 import Vision
+
+extension RemoteCameraMode {
+    func localizedTitle(_ language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.localContinuity, _):
+            return "Continuity Camera"
+        case (.iPhoneStreamBeta, .russian):
+            return "iPhone Stream (бета)"
+        case (.iPhoneStreamBeta, .english):
+            return "iPhone Stream (beta)"
+        }
+    }
+}
+
+extension RemoteCameraConnectionState {
+    func localizedTitle(_ language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.disconnected, .russian):
+            return "Не подключено"
+        case (.disconnected, .english):
+            return "Disconnected"
+        case (.browsing, .russian):
+            return "Поиск iPhone"
+        case (.browsing, .english):
+            return "Searching for iPhone"
+        case (.connecting, .russian):
+            return "Подключение..."
+        case (.connecting, .english):
+            return "Connecting..."
+        case (.connected, .russian):
+            return "Подключено"
+        case (.connected, .english):
+            return "Connected"
+        case (.streaming, .russian):
+            return "Трансляция"
+        case (.streaming, .english):
+            return "Streaming"
+        case (.failed, .russian):
+            return "Ошибка подключения"
+        case (.failed, .english):
+            return "Connection failed"
+        }
+    }
+}
 
 struct ContentView: View {
     @StateObject private var camera = CameraModel()
@@ -361,10 +406,20 @@ private struct CameraStageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
-                CameraPreview(session: camera.session)
+                Group {
+                    if camera.cameraSourceMode == .iPhoneStreamBeta {
+                        RemoteCameraPreview(image: camera.remotePreviewImage)
+                    } else {
+                        CameraPreview(session: camera.session)
+                    }
+                }
                     .background(Color.black)
                     .overlay {
-                        if camera.session == nil {
+                        if camera.cameraSourceMode == .iPhoneStreamBeta {
+                            if camera.remotePreviewImage == nil {
+                                PreviewPlaceholder(camera: camera)
+                            }
+                        } else if camera.session == nil {
                             PreviewPlaceholder(camera: camera)
                         }
                     }
@@ -459,17 +514,17 @@ private struct CameraStageView: View {
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(camera.session == nil ? Color.white.opacity(0.10) : Color.green.opacity(0.35), lineWidth: 1)
+                            .strokeBorder(previewHasSignal ? Color.green.opacity(0.35) : Color.white.opacity(0.10), lineWidth: 1)
                     }
-                    .shadow(color: camera.session == nil ? .clear : .green.opacity(0.16), radius: 28, y: 10)
+                    .shadow(color: previewHasSignal ? .green.opacity(0.16) : .clear, radius: 28, y: 10)
             }
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .aspectRatio(camera.previewAspectRatio, contentMode: .fit)
             .frame(minHeight: 500)
-            .animation(.easeInOut(duration: 0.22), value: camera.session != nil)
+            .animation(.easeInOut(duration: 0.22), value: previewHasSignal)
 
             HStack(spacing: 8) {
-                Image(systemName: camera.selectedDeviceIsIPhone ? "iphone" : "web.camera.fill")
+                Image(systemName: camera.cameraSourceMode == .iPhoneStreamBeta ? "iphone.gen3.radiowaves.left.and.right" : (camera.selectedDeviceIsIPhone ? "iphone" : "web.camera.fill"))
                     .foregroundStyle(.secondary)
                 Text(camera.selectedCameraName)
                     .font(.footnote.weight(.medium))
@@ -478,6 +533,13 @@ private struct CameraStageView: View {
             }
             .padding(.horizontal, 4)
         }
+    }
+
+    private var previewHasSignal: Bool {
+        if camera.cameraSourceMode == .iPhoneStreamBeta {
+            return camera.remotePreviewImage != nil
+        }
+        return camera.session != nil
     }
 }
 
@@ -829,7 +891,7 @@ private struct PreviewPlaceholder: View {
                 .font(.system(size: 42, weight: .medium))
                 .foregroundStyle(camera.statusIsError ? .red : .secondary)
 
-            Text(camera.isSwitchingCamera ? (camera.appLanguage == .russian ? "Переключаю камеру" : "Switching Camera") : camera.previewPlaceholder)
+            Text(placeholderText)
                 .font(.headline)
                 .foregroundStyle(.primary)
 
@@ -840,6 +902,20 @@ private struct PreviewPlaceholder: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.72))
+    }
+
+    private var placeholderText: String {
+        if camera.cameraSourceMode == .iPhoneStreamBeta {
+            if let discovered = camera.remoteDiscoveredDeviceName, camera.remotePreviewImage == nil {
+                return camera.appLanguage == .russian
+                    ? "Найден \(discovered). Нажми Подключить и Начать трансляцию."
+                    : "Found \(discovered). Press Connect and Start Stream."
+            }
+            return camera.appLanguage == .russian
+                ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac."
+                : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac."
+        }
+        return camera.isSwitchingCamera ? (camera.appLanguage == .russian ? "Переключаю камеру" : "Switching Camera") : camera.previewPlaceholder
     }
 }
 
@@ -855,25 +931,29 @@ private struct CameraControlPanel: View {
 
                     HStack(spacing: 8) {
                         CameraModePill(
-                            title: camera.appLanguage == .russian ? "Mac" : "Mac",
+                            title: RemoteCameraMode.localContinuity.localizedTitle(camera.appLanguage),
                             systemImage: "display",
-                            isSelected: camera.session != nil && !camera.selectedDeviceIsIPhone,
-                            isEnabled: camera.hasMacCamera
+                            isSelected: camera.cameraSourceMode == .localContinuity,
+                            isEnabled: true
                         ) {
-                            camera.selectMacCamera()
+                            camera.selectCameraSourceMode(.localContinuity)
                         }
 
                         CameraModePill(
-                            title: "iPhone",
-                            systemImage: "iphone",
-                            isSelected: camera.selectedDeviceIsIPhone,
-                            isEnabled: camera.hasIPhoneCamera
+                            title: RemoteCameraMode.iPhoneStreamBeta.localizedTitle(camera.appLanguage),
+                            systemImage: "iphone.gen3.radiowaves.left.and.right",
+                            isSelected: camera.cameraSourceMode == .iPhoneStreamBeta,
+                            isEnabled: true
                         ) {
-                            camera.selectIPhoneCamera()
+                            camera.selectCameraSourceMode(.iPhoneStreamBeta)
                         }
 
                         Button {
-                            camera.refreshCameraDevices()
+                            if camera.cameraSourceMode == .iPhoneStreamBeta {
+                                camera.reconnectRemoteCamera()
+                            } else {
+                                camera.refreshCameraDevices()
+                            }
                         } label: {
                             Image(systemName: "arrow.clockwise")
                                 .font(.callout.weight(.semibold))
@@ -885,8 +965,14 @@ private struct CameraControlPanel: View {
                                 }
                         }
                         .buttonStyle(.plain)
-                        .help(camera.appLanguage == .russian ? "Обновить камеры" : "Refresh cameras")
+                        .help(camera.appLanguage == .russian ? "Обновить / переподключить" : "Refresh / reconnect")
                     }
+                }
+
+                if camera.cameraSourceMode == .localContinuity {
+                    localContinuityControls
+                } else {
+                    iPhoneStreamControls(camera: camera)
                 }
 
                 ZoomControlPanel(camera: camera)
@@ -1008,6 +1094,119 @@ private struct CameraControlPanel: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var localContinuityControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                CameraModePill(
+                    title: camera.appLanguage == .russian ? "Mac" : "Mac",
+                    systemImage: "display",
+                    isSelected: camera.session != nil && !camera.selectedDeviceIsIPhone,
+                    isEnabled: camera.hasMacCamera
+                ) {
+                    camera.selectMacCamera()
+                }
+
+                CameraModePill(
+                    title: "iPhone",
+                    systemImage: "iphone",
+                    isSelected: camera.selectedDeviceIsIPhone,
+                    isEnabled: camera.hasIPhoneCamera
+                ) {
+                    camera.selectIPhoneCamera()
+                }
+            }
+        }
+    }
+}
+
+private struct iPhoneStreamControls: View {
+    @ObservedObject var camera: CameraModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(camera.appLanguage == .russian ? "iPhone Stream (бета)" : "iPhone Stream (beta)")
+                    .font(.headline.weight(.semibold))
+                Spacer()
+                Text(camera.remoteConnectionState.localizedTitle(camera.appLanguage))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(camera.remoteConnectionState == .failed ? .red : .secondary)
+            }
+
+            if let deviceName = camera.remoteConnectedDeviceName ?? camera.remoteDiscoveredDeviceName {
+                Label(deviceName, systemImage: "iphone")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(camera.appLanguage == .russian
+                    ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac."
+                    : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    if camera.remoteDiscoveredDeviceName != nil {
+                        camera.connectToDiscoveredIPhone()
+                    } else {
+                        camera.reconnectRemoteCamera()
+                    }
+                } label: {
+                    Text(camera.appLanguage == .russian ? "Подключить" : "Connect")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 9)
+                .background(Color.white.opacity(0.07), in: Capsule())
+                .disabled(camera.remoteConnectionState == .connecting)
+
+                Button {
+                    camera.reconnectRemoteCamera()
+                } label: {
+                    Text(camera.appLanguage == .russian ? "Переподключить" : "Reconnect")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 9)
+                .background(Color.white.opacity(0.07), in: Capsule())
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    camera.startRemoteStream()
+                } label: {
+                    Text(camera.appLanguage == .russian ? "Начать трансляцию" : "Start Stream")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 9)
+                .background(Color.green.opacity(0.18), in: Capsule())
+
+                Button {
+                    camera.stopRemoteStream()
+                } label: {
+                    Text(camera.appLanguage == .russian ? "Остановить трансляцию" : "Stop Stream")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 9)
+                .background(Color.red.opacity(0.18), in: Capsule())
+            }
+
+            if let metadata = camera.remoteFrameMetadata {
+                Text("\(camera.appLanguage == .russian ? "FPS / разрешение" : "FPS / Resolution"): \(metadata.fpsApprox ?? 0, specifier: "%.1f") • \(metadata.captureWidth)x\(metadata.captureHeight)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
 }
 
 private struct ZoomControlPanel: View {
@@ -1026,27 +1225,35 @@ private struct ZoomControlPanel: View {
             }
 
             HStack(spacing: 8) {
-                ZoomPresetButton(title: "0.5x", isEnabled: camera.supportsUltraWideZoom) {
-                    camera.setZoomFactor(0.5)
-                }
-                ZoomPresetButton(title: "1x", isEnabled: camera.supportsWideZoom) {
-                    camera.setZoomFactor(1)
+                if camera.cameraSourceMode == .iPhoneStreamBeta {
+                    ForEach(RemoteCameraZoomLevel.allCases) { level in
+                        ZoomPresetButton(title: level.title, isEnabled: camera.remoteAvailableZoomLevels.contains(level)) {
+                            camera.setRemoteZoomLevel(level)
+                        }
+                    }
+                } else {
+                    ZoomPresetButton(title: "0.5x", isEnabled: camera.supportsUltraWideZoom) {
+                        camera.setZoomFactor(0.5)
+                    }
+                    ZoomPresetButton(title: "1x", isEnabled: camera.supportsWideZoom) {
+                        camera.setZoomFactor(1)
+                    }
                 }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
 
-            Text("\(camera.appLanguage == .russian ? "Активно" : "Active"): \(camera.selectedInputSourceName)")
+            Text("\(camera.appLanguage == .russian ? "Активно" : "Active"): \(activeLensLabel)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            if camera.selectedDeviceIsIPhone && !camera.supportsUltraWideZoom {
+            if camera.cameraSourceMode == .localContinuity && camera.selectedDeviceIsIPhone && !camera.supportsUltraWideZoom {
                 Text(camera.appLanguage == .russian ? "0.5x не доступен через это Continuity Camera устройство." : "0.5x is not exposed by this Continuity Camera device.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            if camera.inputSources.isEmpty {
+            if camera.cameraSourceMode == .localContinuity && camera.inputSources.isEmpty {
                 Text(camera.appLanguage == .russian ? "macOS не отдает управление зумом для этой камеры." : "macOS does not expose digital zoom for this camera.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1054,6 +1261,13 @@ private struct ZoomControlPanel: View {
         }
         .padding(12)
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var activeLensLabel: String {
+        if camera.cameraSourceMode == .iPhoneStreamBeta {
+            return camera.remoteFrameMetadata?.zoomLabel ?? (camera.appLanguage == .russian ? "Ожидание iPhone" : "Waiting for iPhone")
+        }
+        return camera.selectedInputSourceName
     }
 }
 
@@ -1133,7 +1347,18 @@ private struct StatusStack: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if camera.statusIsError {
+            if camera.cameraSourceMode == .iPhoneStreamBeta {
+                StatusRow(
+                    title: camera.remoteConnectionState.localizedTitle(camera.appLanguage),
+                    systemImage: camera.remoteConnectionState == .streaming ? "dot.radiowaves.left.and.right" : "iphone.gen3.radiowaves.left.and.right",
+                    color: camera.remoteConnectionState == .failed ? .red : (camera.remoteConnectionState == .streaming ? .green : .blue)
+                )
+                StatusRow(
+                    title: camera.remoteStatusMessage.isEmpty ? (camera.appLanguage == .russian ? "Ожидаю iPhone companion" : "Waiting for iPhone companion") : camera.remoteStatusMessage,
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    color: .secondary
+                )
+            } else if camera.statusIsError {
                 StatusRow(title: camera.appLanguage == .russian ? "Камера недоступна" : "No Camera Available", systemImage: "xmark.circle.fill", color: .red)
             } else if camera.isSwitchingCamera {
                 StatusRow(title: camera.appLanguage == .russian ? "Переключаю камеру" : "Switching Camera", systemImage: "arrow.triangle.2.circlepath", color: .yellow)
@@ -1143,13 +1368,15 @@ private struct StatusStack: View {
                 StatusRow(title: camera.appLanguage == .russian ? "Загружаю камеру" : "Loading Camera", systemImage: "circle.dotted", color: .secondary)
             }
 
-            StatusRow(
-                title: camera.hasIPhoneCamera
-                    ? (camera.appLanguage == .russian ? "iPhone Continuity найден" : "iPhone Continuity Detected")
-                    : (camera.appLanguage == .russian ? "iPhone Continuity не найден" : "iPhone Continuity Not Found"),
-                systemImage: camera.hasIPhoneCamera ? "iphone.circle.fill" : "iphone.slash",
-                color: camera.hasIPhoneCamera ? .blue : .secondary
-            )
+            if camera.cameraSourceMode == .localContinuity {
+                StatusRow(
+                    title: camera.hasIPhoneCamera
+                        ? (camera.appLanguage == .russian ? "iPhone Continuity найден" : "iPhone Continuity Detected")
+                        : (camera.appLanguage == .russian ? "iPhone Continuity не найден" : "iPhone Continuity Not Found"),
+                    systemImage: camera.hasIPhoneCamera ? "iphone.circle.fill" : "iphone.slash",
+                    color: camera.hasIPhoneCamera ? .blue : .secondary
+                )
+            }
         }
     }
 }
@@ -1551,6 +1778,7 @@ final class CameraModel: ObservableObject {
     static let isEmergencyUnlockEnabled = true
 
     @Published private(set) var session: AVCaptureSession?
+    @Published private(set) var cameraSourceMode: RemoteCameraMode = .localContinuity
     @Published private(set) var devices: [CameraDeviceInfo] = []
     @Published private(set) var hasMacCamera = false
     @Published private(set) var hasIPhoneCamera = false
@@ -1573,6 +1801,13 @@ final class CameraModel: ObservableObject {
     @Published private(set) var selectedInputSourceID: String?
     @Published private(set) var selectedInputSourceName = "Default"
     @Published private(set) var previewVideoSize = CGSize(width: 16, height: 9)
+    @Published private(set) var remoteConnectionState: RemoteCameraConnectionState = .disconnected
+    @Published private(set) var remoteStatusMessage = ""
+    @Published private(set) var remotePreviewImage: NSImage?
+    @Published private(set) var remoteDiscoveredDeviceName: String?
+    @Published private(set) var remoteConnectedDeviceName: String?
+    @Published private(set) var remoteAvailableZoomLevels: [RemoteCameraZoomLevel] = []
+    @Published private(set) var remoteFrameMetadata: RemoteCameraFrameMetadata?
     @Published private(set) var hasReceivedCameraFrame = false
     @Published private(set) var plankTimeRemaining: Double = 0
     @Published private(set) var plankIsActive = false
@@ -1754,6 +1989,10 @@ final class CameraModel: ObservableObject {
     private let poseDetectionService = PoseDetectionService()
     private let soundFeedback = SoundFeedbackService.shared
     private let voiceCommandService = VoiceCommandService()
+    private lazy var remoteTransport = RemoteCameraTransport(
+        role: .macHost,
+        displayName: Host.current().localizedName ?? "BreakGateWorkout Mac"
+    )
     private var targetRepCount = 20
     private var captureDevices: [AVCaptureDevice] = []
     private var lastPlankTick: Date?
@@ -1784,6 +2023,7 @@ final class CameraModel: ObservableObject {
     }
 
     init() {
+        remoteTransport.delegate = self
         poseDetectionService.onUpdate = { [weak self] update in
             self?.applyPoseUpdate(update)
         }
@@ -1808,12 +2048,22 @@ final class CameraModel: ObservableObject {
 
     func start() async {
         DiagnosticLog.log("CameraModel.start requested")
+        remoteTransport.start()
         refreshDevices()
 
         let granted = await requestCameraAccess()
         guard granted else {
             DiagnosticLog.log("CameraModel.start stopped: camera permission denied")
             clearPreview(message: appLanguage == .russian ? "Нет доступа к камере. Разреши доступ в System Settings." : "Camera permission denied. Enable camera access in System Settings.", isError: true)
+            return
+        }
+
+        guard cameraSourceMode == .localContinuity else {
+            statusMessage = appLanguage == .russian
+                ? "Ожидаю iPhone Stream (бета)."
+                : "Waiting for iPhone Stream (beta)."
+            statusIsError = false
+            session = nil
             return
         }
 
@@ -1840,11 +2090,19 @@ final class CameraModel: ObservableObject {
         sessionController.stop()
         poseDetectionService.reset()
         voiceCommandService.stop()
+        remoteTransport.stop()
         session = nil
         selectedDeviceID = nil
         selectedCameraName = "None"
         isSwitchingCamera = false
         hasReceivedCameraFrame = false
+        remotePreviewImage = nil
+        remoteDiscoveredDeviceName = nil
+        remoteConnectedDeviceName = nil
+        remoteAvailableZoomLevels = []
+        remoteFrameMetadata = nil
+        remoteStatusMessage = ""
+        remoteConnectionState = .disconnected
         resetPoseState()
     }
 
@@ -1877,6 +2135,7 @@ final class CameraModel: ObservableObject {
     }
 
     func selectMacCamera() {
+        cameraSourceMode = .localContinuity
         refreshDevices()
         guard let device = preferredMacCamera() else {
             clearPreview(message: appLanguage == .russian ? "Mac камера недоступна." : "No Mac camera is available.", isError: true)
@@ -1886,6 +2145,7 @@ final class CameraModel: ObservableObject {
     }
 
     func selectIPhoneCamera() {
+        cameraSourceMode = .localContinuity
         refreshDevices()
         guard let device = preferredIPhoneCamera() else {
             guard let fallback = preferredMacCamera() else {
@@ -1904,6 +2164,7 @@ final class CameraModel: ObservableObject {
     }
 
     func selectCamera(id: String) {
+        cameraSourceMode = .localContinuity
         refreshDevices()
         guard let device = captureDevices.first(where: { $0.uniqueID == id }) else {
             guard let fallback = preferredMacCamera() else {
@@ -2041,12 +2302,69 @@ final class CameraModel: ObservableObject {
         showSkeletonOverlay = isVisible
     }
 
+    func selectCameraSourceMode(_ mode: RemoteCameraMode) {
+        guard cameraSourceMode != mode else { return }
+        cameraSourceMode = mode
+
+        switch mode {
+        case .localContinuity:
+            remotePreviewImage = nil
+            remoteFrameMetadata = nil
+            remoteConnectionState = .disconnected
+            remoteStatusMessage = ""
+            hasReceivedCameraFrame = false
+            Task { [weak self] in
+                await self?.start()
+            }
+        case .iPhoneStreamBeta:
+            sessionController.stop()
+            session = nil
+            selectedDeviceID = nil
+            selectedCameraName = remoteConnectedDeviceName ?? (appLanguage == .russian ? "iPhone Stream (бета)" : "iPhone Stream (beta)")
+            statusMessage = appLanguage == .russian
+                ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac."
+                : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac."
+            statusIsError = false
+            remoteTransport.reconnect()
+        }
+    }
+
+    func reconnectRemoteCamera() {
+        cameraSourceMode = .iPhoneStreamBeta
+        remoteTransport.reconnect()
+    }
+
+    func connectToDiscoveredIPhone() {
+        cameraSourceMode = .iPhoneStreamBeta
+        remoteTransport.inviteNearbyPeer()
+    }
+
+    func startRemoteStream() {
+        let sessionID = UUID().uuidString
+        remoteTransport.send(.control(.startStream(sessionID: sessionID)))
+    }
+
+    func stopRemoteStream() {
+        remoteTransport.send(.control(.stopStream))
+    }
+
+    func setRemoteZoomLevel(_ level: RemoteCameraZoomLevel) {
+        remoteTransport.send(.control(.setZoom(level: level)))
+    }
+
     func setDebugPanelVisible(_ isVisible: Bool) {
         showDebugPanel = isVisible
         UserDefaults.standard.set(isVisible, forKey: "BreakGateWorkout.showDebugPanel")
     }
 
     func setZoomFactor(_ requestedZoomFactor: CGFloat) {
+        if cameraSourceMode == .iPhoneStreamBeta {
+            if let level = nearestRemoteZoomLevel(for: Double(requestedZoomFactor)) {
+                setRemoteZoomLevel(level)
+            }
+            return
+        }
+
         guard let requestedInputSourceID = preferredInputSourceID(for: requestedZoomFactor) else {
             statusMessage = requestedZoomFactor < 1
                 ? "0.5x lens is not exposed by this camera."
@@ -2071,6 +2389,7 @@ final class CameraModel: ObservableObject {
     }
 
     private func requestCameraAccess() async -> Bool {
+        guard cameraSourceMode == .localContinuity else { return true }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             return true
@@ -2202,6 +2521,11 @@ final class CameraModel: ObservableObject {
         isSwitchingCamera = false
         hasReceivedCameraFrame = false
         resetPoseState()
+    }
+
+    private func nearestRemoteZoomLevel(for zoom: Double) -> RemoteCameraZoomLevel? {
+        let levels = remoteAvailableZoomLevels.isEmpty ? RemoteCameraZoomLevel.allCases : remoteAvailableZoomLevels
+        return levels.min(by: { abs($0.zoomFactor - zoom) < abs($1.zoomFactor - zoom) })
     }
 
     private func applyPoseUpdate(_ update: PoseDetectionUpdate) {
@@ -3065,6 +3389,68 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
                         videoSize: CGSize(width: 16, height: 9)
                     )
                 )
+            }
+        }
+    }
+
+    func processRemoteFrame(cgImage: CGImage, metadata: RemoteCameraFrameMetadata) {
+        videoOutputQueue.async { [weak self] in
+            guard let self else { return }
+
+            let now = CACurrentMediaTime()
+            self.diagnosticsFramesSeen += 1
+            self.reportDiagnosticsIfNeeded(now: now)
+            guard now - self.lastProcessedTime >= self.minimumFrameInterval else { return }
+            guard !self.isProcessingFrame else { return }
+
+            self.lastProcessedTime = now
+            self.isProcessingFrame = true
+            self.diagnosticsVisionRuns += 1
+
+            defer {
+                self.isProcessingFrame = false
+            }
+
+            let videoSize = CGSize(width: metadata.captureWidth, height: metadata.captureHeight)
+            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+
+            do {
+                try handler.perform([self.bodyPoseRequest])
+
+                guard let observation = self.bodyPoseRequest.results?.first else {
+                    self.publishPersonLostIfNeeded()
+                    self.publish(workoutState: .noPerson, debugState: WorkoutState.noPerson.rawValue, confidence: 0, isPersonDetected: false, posePoints: [], videoSize: videoSize)
+                    return
+                }
+
+                let points = try observation.recognizedPoints(.all)
+                let usablePoints = points.values.filter { $0.confidence >= self.minimumPointConfidence }
+                let averageConfidence = usablePoints.isEmpty ? 0 : usablePoints.reduce(Float(0)) { $0 + $1.confidence } / Float(usablePoints.count)
+
+                guard usablePoints.count >= 5 else {
+                    self.publishPersonLostIfNeeded()
+                    self.publish(workoutState: .noPerson, debugState: WorkoutState.noPerson.rawValue, confidence: averageConfidence, isPersonDetected: false, posePoints: [], videoSize: videoSize)
+                    return
+                }
+
+                if !self.personWasDetected {
+                    self.personWasDetected = true
+                    print("BreakGateWorkout pose: remote person detected")
+                }
+
+                let startingPoseDetected = self.isStartingPoseValid(points: points)
+                let poseResult = self.countingEnabled ? self.updateExerciseState(points: points) : self.startingPoseResult(isDetected: startingPoseDetected)
+                self.publish(
+                    workoutState: poseResult.state,
+                    debugState: poseResult.debugState,
+                    confidence: averageConfidence,
+                    isPersonDetected: true,
+                    isStartingPoseDetected: startingPoseDetected,
+                    posePoints: self.skeletonPoints(from: points),
+                    videoSize: videoSize
+                )
+            } catch {
+                self.publish(workoutState: .idle, debugState: WorkoutState.idle.rawValue, confidence: 0, isPersonDetected: false, posePoints: [], videoSize: videoSize)
             }
         }
     }
@@ -4437,5 +4823,52 @@ final class PreviewView: NSView {
         previewLayer.videoGravity = .resizeAspect
         previewLayer.backgroundColor = NSColor.black.cgColor
         layer = previewLayer
+    }
+}
+
+extension CameraModel: RemoteCameraTransportDelegate {
+    func remoteCameraTransport(_ transport: RemoteCameraTransport, didChangeSnapshot snapshot: RemoteCameraSessionSnapshot) {
+        remoteConnectionState = snapshot.connectionState
+        remoteStatusMessage = snapshot.statusText
+        remoteDiscoveredDeviceName = snapshot.discoveredDeviceName
+        remoteConnectedDeviceName = snapshot.connectedDeviceName
+        remoteAvailableZoomLevels = snapshot.availableZoomLevels
+        if cameraSourceMode == .iPhoneStreamBeta {
+            selectedCameraName = snapshot.connectedDeviceName ?? snapshot.discoveredDeviceName ?? (appLanguage == .russian ? "iPhone Stream (бета)" : "iPhone Stream (beta)")
+            statusMessage = snapshot.statusText.isEmpty
+                ? (appLanguage == .russian ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac." : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac.")
+                : snapshot.statusText
+        }
+    }
+
+    func remoteCameraTransport(_ transport: RemoteCameraTransport, didReceiveFrame metadata: RemoteCameraFrameMetadata, jpegData: Data) {
+        remoteFrameMetadata = metadata
+        selectedCameraName = metadata.deviceName
+        zoomFactor = CGFloat(metadata.zoomFactor)
+        previewVideoSize = CGSize(width: metadata.captureWidth, height: metadata.captureHeight)
+        hasReceivedCameraFrame = true
+
+        guard cameraSourceMode == .iPhoneStreamBeta else { return }
+
+        if let image = NSImage(data: jpegData) {
+            remotePreviewImage = image
+            statusMessage = appLanguage == .russian
+                ? "Трансляция с iPhone активна"
+                : "iPhone stream is active"
+            statusIsError = false
+
+            if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                poseDetectionService.processRemoteFrame(cgImage: cgImage, metadata: metadata)
+            }
+        }
+    }
+
+    func remoteCameraTransport(_ transport: RemoteCameraTransport, didReceiveControl control: RemoteCameraControlMessage) {
+        switch control {
+        case .pong(let timestampSeconds):
+            DiagnosticLog.log("remote pong \(timestampSeconds)")
+        default:
+            break
+        }
     }
 }

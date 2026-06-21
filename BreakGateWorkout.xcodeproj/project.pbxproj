@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		8F85210E2FE4575F002501B5 /* BreakGateWorkout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BreakGateWorkout.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F12345012FE5000000000001 /* BreakGateWorkoutPhone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BreakGateWorkoutPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -17,6 +18,21 @@
 				Info.plist,
 			);
 			target = 8F85210D2FE4575F002501B5 /* BreakGateWorkout */;
+		};
+		F12345022FE5000000000002 /* Exceptions for "BreakGateWorkoutPhone" folder in "BreakGateWorkoutPhone" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F12345072FE5000000000007 /* BreakGateWorkoutPhone */;
+		};
+		F123450C2FE500000000000C /* Exceptions for "Shared" folder in "BreakGateWorkout" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			target = 8F85210D2FE4575F002501B5 /* BreakGateWorkout */;
+		};
+		F123450D2FE500000000000D /* Exceptions for "Shared" folder in "BreakGateWorkoutPhone" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			target = F12345072FE5000000000007 /* BreakGateWorkoutPhone */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -29,10 +45,34 @@
 			path = BreakGateWorkout;
 			sourceTree = "<group>";
 		};
+		F12345032FE5000000000003 /* BreakGateWorkoutPhone */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F12345022FE5000000000002 /* Exceptions for "BreakGateWorkoutPhone" folder in "BreakGateWorkoutPhone" target */,
+			);
+			path = BreakGateWorkoutPhone;
+			sourceTree = "<group>";
+		};
+		F123450E2FE500000000000E /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F123450C2FE500000000000C /* Exceptions for "Shared" folder in "BreakGateWorkout" target */,
+				F123450D2FE500000000000D /* Exceptions for "Shared" folder in "BreakGateWorkoutPhone" target */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		8F85210B2FE4575F002501B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F12345062FE5000000000006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +86,8 @@
 			isa = PBXGroup;
 			children = (
 				8F8521102FE4575F002501B5 /* BreakGateWorkout */,
+				F123450E2FE500000000000E /* Shared */,
+				F12345032FE5000000000003 /* BreakGateWorkoutPhone */,
 				8F85210F2FE4575F002501B5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				8F85210E2FE4575F002501B5 /* BreakGateWorkout.app */,
+				F12345012FE5000000000001 /* BreakGateWorkoutPhone.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -75,12 +118,36 @@
 			);
 			fileSystemSynchronizedGroups = (
 				8F8521102FE4575F002501B5 /* BreakGateWorkout */,
+				F123450E2FE500000000000E /* Shared */,
 			);
 			name = BreakGateWorkout;
 			packageProductDependencies = (
 			);
 			productName = BreakGateWorkout;
 			productReference = 8F85210E2FE4575F002501B5 /* BreakGateWorkout.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F12345072FE5000000000007 /* BreakGateWorkoutPhone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F123450B2FE500000000000B /* Build configuration list for PBXNativeTarget "BreakGateWorkoutPhone" */;
+			buildPhases = (
+				F12345042FE5000000000004 /* Sources */,
+				F12345062FE5000000000006 /* Frameworks */,
+				F12345052FE5000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F123450E2FE500000000000E /* Shared */,
+				F12345032FE5000000000003 /* BreakGateWorkoutPhone */,
+			);
+			name = BreakGateWorkoutPhone;
+			packageProductDependencies = (
+			);
+			productName = BreakGateWorkoutPhone;
+			productReference = F12345012FE5000000000001 /* BreakGateWorkoutPhone.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -94,6 +161,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					8F85210D2FE4575F002501B5 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					F12345072FE5000000000007 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 				};
@@ -113,6 +183,7 @@
 			projectRoot = "";
 			targets = (
 				8F85210D2FE4575F002501B5 /* BreakGateWorkout */,
+				F12345072FE5000000000007 /* BreakGateWorkoutPhone */,
 			);
 		};
 /* End PBXProject section */
@@ -125,10 +196,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F12345052FE5000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		8F85210A2FE4575F002501B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F12345042FE5000000000004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -269,11 +354,11 @@
 				DEVELOPMENT_TEAM = 24V24WJ493;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
-				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
-				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = YES;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
 				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
@@ -324,11 +409,11 @@
 				DEVELOPMENT_TEAM = 24V24WJ493;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
-				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
-				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = YES;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
 				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
@@ -366,6 +451,52 @@
 			};
 			name = Release;
 		};
+		F12345082FE5000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 24V24WJ493;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BreakGateWorkoutPhone/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.artemida.BreakGateWorkoutPhone;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		F12345092FE5000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 24V24WJ493;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BreakGateWorkoutPhone/Info.plist;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.artemida.BreakGateWorkoutPhone;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -383,6 +514,15 @@
 			buildConfigurations = (
 				8F85211A2FE45760002501B5 /* Debug */,
 				8F85211B2FE45760002501B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F123450B2FE500000000000B /* Build configuration list for PBXNativeTarget "BreakGateWorkoutPhone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F12345082FE5000000000008 /* Debug */,
+				F12345092FE5000000000009 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

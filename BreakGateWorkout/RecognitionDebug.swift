@@ -337,50 +337,114 @@ private struct RecognitionDebugContributionView: View {
 
             HStack(spacing: 10) {
                 Button {
-                    camera.selectMacCamera()
+                    camera.selectCameraSourceMode(.localContinuity)
                 } label: {
-                    Label(language == .russian ? "Mac" : "Mac", systemImage: "macbook")
+                    Label(RemoteCameraMode.localContinuity.localizedTitle(language), systemImage: "display")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
-                .disabled(!camera.hasMacCamera)
+                .buttonStyle(RecognitionDebugButtonStyle(kind: camera.cameraSourceMode == .localContinuity ? .primary : .secondary))
 
                 Button {
-                    camera.selectIPhoneCamera()
+                    camera.selectCameraSourceMode(.iPhoneStreamBeta)
                 } label: {
-                    Label(language == .russian ? "iPhone" : "iPhone", systemImage: "iphone")
+                    Label(RemoteCameraMode.iPhoneStreamBeta.localizedTitle(language), systemImage: "iphone.gen3.radiowaves.left.and.right")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(RecognitionDebugButtonStyle(kind: camera.selectedDeviceIsIPhone ? .primary : .secondary))
-                .disabled(!camera.hasIPhoneCamera)
+                .buttonStyle(RecognitionDebugButtonStyle(kind: camera.cameraSourceMode == .iPhoneStreamBeta ? .primary : .secondary))
 
                 Button {
-                    camera.refreshCameraDevices()
+                    if camera.cameraSourceMode == .iPhoneStreamBeta {
+                        camera.reconnectRemoteCamera()
+                    } else {
+                        camera.refreshCameraDevices()
+                    }
                 } label: {
-                    Label(language == .russian ? "Обновить" : "Refresh", systemImage: "arrow.clockwise")
+                    Label(language == .russian ? "Обновить / переподключить" : "Refresh / Reconnect", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
             }
 
-            if camera.hasIPhoneCamera {
-                Text(language == .russian
-                    ? "Можно выбрать iPhone Continuity Camera перед стартом теста. Это не iPhone Stream и не требует iOS-приложения."
-                    : "You can select iPhone Continuity Camera before starting the test. This is not iPhone Stream and does not require an iOS app."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if camera.cameraSourceMode == .localContinuity {
+                HStack(spacing: 10) {
+                    Button {
+                        camera.selectMacCamera()
+                    } label: {
+                        Label(language == .russian ? "Mac" : "Mac", systemImage: "macbook")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+                    .disabled(!camera.hasMacCamera)
+
+                    Button {
+                        camera.selectIPhoneCamera()
+                    } label: {
+                        Label(language == .russian ? "iPhone" : "iPhone", systemImage: "iphone")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: camera.selectedDeviceIsIPhone ? .primary : .secondary))
+                    .disabled(!camera.hasIPhoneCamera)
+                }
+
+                if camera.hasIPhoneCamera {
+                    Text(language == .russian
+                        ? "Можно выбрать iPhone Continuity Camera перед стартом теста. Это не iPhone Stream и не требует iOS-приложения."
+                        : "You can select iPhone Continuity Camera before starting the test. This is not iPhone Stream and does not require an iOS app."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text(language == .russian
+                        ? "Если iPhone не появился, включи Continuity Camera рядом с Mac и нажми Обновить."
+                        : "If iPhone does not appear, enable Continuity Camera near your Mac and press Refresh."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             } else {
                 Text(language == .russian
-                    ? "Если iPhone не появился, включи Continuity Camera рядом с Mac и нажми Обновить."
-                    : "If iPhone does not appear, enable Continuity Camera near your Mac and press Refresh."
+                    ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac. Для beta-режима используется реальная камера iPhone без Continuity crop."
+                    : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac. This beta mode uses the real iPhone camera without Continuity crop."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button {
+                        if camera.remoteDiscoveredDeviceName != nil {
+                            camera.connectToDiscoveredIPhone()
+                        } else {
+                            camera.reconnectRemoteCamera()
+                        }
+                    } label: {
+                        Label(language == .russian ? "Подключить" : "Connect", systemImage: "link")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+
+                    Button {
+                        camera.startRemoteStream()
+                    } label: {
+                        Label(language == .russian ? "Начать трансляцию" : "Start Stream", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+
+                    Button {
+                        camera.stopRemoteStream()
+                    } label: {
+                        Label(language == .russian ? "Остановить трансляцию" : "Stop Stream", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+                }
             }
 
-            Label(camera.statusMessage, systemImage: camera.statusIsError ? "exclamationmark.triangle.fill" : (camera.isSwitchingCamera ? "arrow.triangle.2.circlepath" : "camera.aperture"))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(camera.statusIsError ? .yellow : .secondary)
+            Label(
+                camera.cameraSourceMode == .iPhoneStreamBeta ? camera.remoteConnectionState.localizedTitle(language) : camera.statusMessage,
+                systemImage: camera.statusIsError ? "exclamationmark.triangle.fill" : (camera.isSwitchingCamera ? "arrow.triangle.2.circlepath" : "camera.aperture")
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(camera.statusIsError ? .yellow : .secondary)
         }
         .padding(16)
         .background(Color.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -465,10 +529,16 @@ private struct RecognitionDebugContributionView: View {
 
     private var recognitionCameraView: some View {
         ZStack(alignment: .topLeading) {
-            CameraPreview(session: camera.session)
+            Group {
+                if camera.cameraSourceMode == .iPhoneStreamBeta {
+                    RemoteCameraPreview(image: camera.remotePreviewImage)
+                } else {
+                    CameraPreview(session: camera.session)
+                }
+            }
                 .background(Color.black)
                 .overlay {
-                    if camera.statusIsError || camera.isSwitchingCamera || camera.session == nil || !camera.hasReceivedCameraFrame {
+                    if camera.statusIsError || camera.isSwitchingCamera || (camera.cameraSourceMode == .localContinuity && (camera.session == nil || !camera.hasReceivedCameraFrame)) || (camera.cameraSourceMode == .iPhoneStreamBeta && camera.remotePreviewImage == nil) {
                         RecognitionDebugCameraPlaceholder(camera: camera, language: language)
                     }
                 }
@@ -1288,7 +1358,14 @@ private final class RecognitionDebugRecorder: ObservableObject {
             ($0.name.debugName, RecognitionDebugJointPoint(x: Double($0.location.x), y: Double($0.location.y), confidence: Double($0.confidence)))
         })
         let metrics = RecognitionDebugMetrics(points: update.posePoints, exerciseMode: step.mode)
-        let cameraSourceMode = camera.selectedDeviceIsIPhone ? "continuity" : "mac"
+        let cameraSourceMode: String
+        if camera.cameraSourceMode == .iPhoneStreamBeta {
+            cameraSourceMode = "iPhoneStreamBeta"
+        } else if camera.selectedDeviceIsIPhone {
+            cameraSourceMode = "continuity"
+        } else {
+            cameraSourceMode = "mac"
+        }
         let previewSize = RecognitionDebugSize(width: Double(camera.previewVideoSize.width), height: Double(camera.previewVideoSize.height))
         let sample = RecognitionDebugPoseSample(
             timestampSeconds: sessionTimeSeconds,
@@ -1326,7 +1403,15 @@ private final class RecognitionDebugRecorder: ObservableObject {
                 cameraSourceMode: cameraSourceMode,
                 selectedCameraName: camera.selectedCameraName,
                 previewVideoSize: previewSize,
-                captureResolution: RecognitionDebugSize(width: Double(update.videoSize.width), height: Double(update.videoSize.height))
+                captureResolution: RecognitionDebugSize(width: Double(update.videoSize.width), height: Double(update.videoSize.height)),
+                videoOrientation: camera.remoteFrameMetadata?.orientation,
+                isMirrored: camera.remoteFrameMetadata?.isMirrored,
+                lensType: camera.remoteFrameMetadata?.lensType,
+                zoomLabel: camera.remoteFrameMetadata?.zoomLabel,
+                zoomFactor: camera.remoteFrameMetadata?.zoomFactor,
+                remoteConnectionType: camera.cameraSourceMode == .iPhoneStreamBeta ? "multipeerConnectivity" : nil,
+                remoteFrameFPSApprox: camera.remoteFrameMetadata?.fpsApprox,
+                remoteLatencyMsApprox: camera.remoteFrameMetadata?.latencyMsApprox
             )
         } catch {
             isActive = false
@@ -1375,7 +1460,7 @@ private final class RecognitionDebugRecorder: ObservableObject {
             videoFrameCount: videoResult.videoFrameCount,
             videoFPSApprox: videoResult.videoFPSApprox,
             videoResolution: videoResult.videoResolution,
-            videoOrientation: videoResult.videoOrientation,
+            videoOrientation: lastCameraSnapshot?.videoOrientation ?? videoResult.videoOrientation,
             videoError: videoError,
             firstVideoPresentationTimestamp: videoResult.firstVideoPresentationTimestamp,
             videoStartSessionTimeSeconds: videoResult.videoStartSessionTimeSeconds,
@@ -1383,11 +1468,17 @@ private final class RecognitionDebugRecorder: ObservableObject {
             selectedCameraName: lastCameraSnapshot?.selectedCameraName,
             previewVideoSize: lastCameraSnapshot?.previewVideoSize,
             captureResolution: lastCameraSnapshot?.captureResolution,
+            isMirrored: lastCameraSnapshot?.isMirrored,
+            lensType: lastCameraSnapshot?.lensType,
+            zoomLabel: lastCameraSnapshot?.zoomLabel,
+            zoomFactor: lastCameraSnapshot?.zoomFactor,
+            remoteConnectionType: lastCameraSnapshot?.remoteConnectionType,
+            remoteFrameFPSApprox: lastCameraSnapshot?.remoteFrameFPSApprox,
+            remoteLatencyMsApprox: lastCameraSnapshot?.remoteLatencyMsApprox,
             macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             deviceModel: Self.deviceModel(),
             poseCoordinateSpace: "Vision normalized image coordinates",
             poseOrigin: "bottom-left",
-            isMirrored: nil,
             previewGravity: "aspectFit",
             startedAt: ISO8601DateFormatter().string(from: createdAt),
             endedAt: ISO8601DateFormatter().string(from: endDate),
@@ -2002,11 +2093,17 @@ private struct RecognitionDebugMetadata: Codable {
     let selectedCameraName: String?
     let previewVideoSize: RecognitionDebugSize?
     let captureResolution: RecognitionDebugSize?
+    let isMirrored: Bool?
+    let lensType: String?
+    let zoomLabel: String?
+    let zoomFactor: Double?
+    let remoteConnectionType: String?
+    let remoteFrameFPSApprox: Double?
+    let remoteLatencyMsApprox: Double?
     let macOSVersion: String
     let deviceModel: String?
     let poseCoordinateSpace: String
     let poseOrigin: String
-    let isMirrored: Bool?
     let previewGravity: String
     let startedAt: String
     let endedAt: String
@@ -2146,6 +2243,14 @@ private struct RecognitionDebugCameraSnapshot {
     let selectedCameraName: String
     let previewVideoSize: RecognitionDebugSize
     let captureResolution: RecognitionDebugSize
+    let videoOrientation: String?
+    let isMirrored: Bool?
+    let lensType: String?
+    let zoomLabel: String?
+    let zoomFactor: Double?
+    let remoteConnectionType: String?
+    let remoteFrameFPSApprox: Double?
+    let remoteLatencyMsApprox: Double?
 }
 
 private struct RecognitionDebugVideoResult {
