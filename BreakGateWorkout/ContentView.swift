@@ -1573,6 +1573,7 @@ final class CameraModel: ObservableObject {
     @Published private(set) var selectedInputSourceID: String?
     @Published private(set) var selectedInputSourceName = "Default"
     @Published private(set) var previewVideoSize = CGSize(width: 16, height: 9)
+    @Published private(set) var hasReceivedCameraFrame = false
     @Published private(set) var plankTimeRemaining: Double = 0
     @Published private(set) var plankIsActive = false
     @Published private(set) var coachingMessage: String?
@@ -1773,6 +1774,10 @@ final class CameraModel: ObservableObject {
     private var exerciseCountingEnabled = false
     private var voiceStartRequested = false
     private var automaticStartWindowExpired = false
+    private var recognitionDebugSessionActive = false
+    var onRecognitionDebugPoseUpdate: ((CameraModel, PoseDetectionUpdate) -> Void)?
+    var onRecognitionDebugStepCompleted: (() -> Void)?
+    var onRecognitionDebugVideoSampleBuffer: ((CMSampleBuffer) -> Void)?
 
     private var startingPoseConfidenceThreshold: Float {
         selectedMode == .plank ? 0.22 : 0.34
@@ -1781,6 +1786,9 @@ final class CameraModel: ObservableObject {
     init() {
         poseDetectionService.onUpdate = { [weak self] update in
             self?.applyPoseUpdate(update)
+        }
+        poseDetectionService.onSampleBuffer = { [weak self] sampleBuffer in
+            self?.onRecognitionDebugVideoSampleBuffer?(sampleBuffer)
         }
         voiceCommandService.onStatus = { [weak self] status in
             self?.voiceStatusMessage = status
@@ -1809,7 +1817,11 @@ final class CameraModel: ObservableObject {
             return
         }
 
-        guard let device = preferredMacCamera() else {
+        let device = selectedDeviceID.flatMap { id in
+            captureDevices.first(where: { $0.uniqueID == id })
+        } ?? preferredMacCamera()
+
+        guard let device else {
             DiagnosticLog.log("CameraModel.start stopped: no camera available")
             clearPreview(message: appLanguage == .russian ? "Камера недоступна." : "No camera available.", isError: true)
             return
@@ -1821,6 +1833,10 @@ final class CameraModel: ObservableObject {
 
     func stop() {
         DiagnosticLog.log("CameraModel.stop requested")
+        recognitionDebugSessionActive = false
+        onRecognitionDebugPoseUpdate = nil
+        onRecognitionDebugStepCompleted = nil
+        onRecognitionDebugVideoSampleBuffer = nil
         sessionController.stop()
         poseDetectionService.reset()
         voiceCommandService.stop()
@@ -1828,6 +1844,7 @@ final class CameraModel: ObservableObject {
         selectedDeviceID = nil
         selectedCameraName = "None"
         isSwitchingCamera = false
+        hasReceivedCameraFrame = false
         resetPoseState()
     }
 
@@ -1871,7 +1888,16 @@ final class CameraModel: ObservableObject {
     func selectIPhoneCamera() {
         refreshDevices()
         guard let device = preferredIPhoneCamera() else {
-            clearPreview(message: appLanguage == .russian ? "iPhone Continuity Camera недоступна." : "iPhone Continuity Camera is not available.", isError: true)
+            guard let fallback = preferredMacCamera() else {
+                clearPreview(message: appLanguage == .russian ? "iPhone Continuity Camera недоступна." : "iPhone Continuity Camera is not available.", isError: true)
+                return
+            }
+
+            statusMessage = appLanguage == .russian
+                ? "iPhone Continuity Camera недоступна. Переключаюсь на доступную Mac камеру."
+                : "iPhone Continuity Camera is not available. Switching to the available Mac camera."
+            statusIsError = false
+            configureCamera(fallback, allowFallback: false)
             return
         }
         configureCamera(device)
@@ -1880,7 +1906,16 @@ final class CameraModel: ObservableObject {
     func selectCamera(id: String) {
         refreshDevices()
         guard let device = captureDevices.first(where: { $0.uniqueID == id }) else {
-            clearPreview(message: appLanguage == .russian ? "Выбранная камера больше недоступна." : "Selected camera is no longer available.", isError: true)
+            guard let fallback = preferredMacCamera() else {
+                clearPreview(message: appLanguage == .russian ? "Выбранная камера больше недоступна." : "Selected camera is no longer available.", isError: true)
+                return
+            }
+
+            statusMessage = appLanguage == .russian
+                ? "Выбранная камера недоступна. Переключаюсь на доступную Mac камеру."
+                : "Selected camera is unavailable. Switching to the available Mac camera."
+            statusIsError = false
+            configureCamera(fallback, allowFallback: false)
             return
         }
         configureCamera(device)
@@ -1935,6 +1970,27 @@ final class CameraModel: ObservableObject {
         currentStepIndex = 0
         completedSteps = []
         applyCurrentStep(resetPoseService: true)
+    }
+
+    func startRecognitionDebugStep(_ step: WorkoutStep) {
+        recognitionDebugSessionActive = true
+        activeWorkoutPlan = WorkoutSettingsStore.normalized(WorkoutPlan(difficulty: .light, steps: [step]))
+        currentStepIndex = 0
+        completedSteps = []
+        applyCurrentStep(resetPoseService: true)
+        exerciseCountingEnabled = true
+        voiceStartRequested = false
+        automaticStartWindowExpired = true
+        primaryOverlayMessage = nil
+        poseWaitCountdownText = nil
+        poseDetectionService.setCountingEnabled(true)
+        DiagnosticLog.log("recognition debug step started mode=\(selectedMode.rawValue) target=\(currentTargetAmount)")
+    }
+
+    func stopRecognitionDebugSession() {
+        recognitionDebugSessionActive = false
+        poseDetectionService.setCountingEnabled(false)
+        DiagnosticLog.log("recognition debug session stopped")
     }
 
     private func handleVoiceCommand(_ command: VoiceCommand, transcript: String) {
@@ -2069,12 +2125,20 @@ final class CameraModel: ObservableObject {
         captureDevices.first(where: isIPhoneCamera)
     }
 
+    private func fallbackCamera(excluding device: AVCaptureDevice) -> AVCaptureDevice? {
+        if let macCamera = preferredMacCamera(), macCamera.uniqueID != device.uniqueID {
+            return macCamera
+        }
+
+        return captureDevices.first(where: { $0.uniqueID != device.uniqueID })
+    }
+
     private func isIPhoneCamera(_ device: AVCaptureDevice) -> Bool {
         let name = device.localizedName.lowercased()
         return device.isContinuityCamera || name.contains("iphone") || name.contains("continuity")
     }
 
-    private func configureCamera(_ device: AVCaptureDevice) {
+    private func configureCamera(_ device: AVCaptureDevice, allowFallback: Bool = true) {
         let deviceName = device.localizedName
         DiagnosticLog.log("CameraModel.configureCamera device=\(deviceName)")
         selectedDeviceID = device.uniqueID
@@ -2083,6 +2147,7 @@ final class CameraModel: ObservableObject {
         statusMessage = appLanguage == .russian ? "Запускаю \(deviceName)..." : "Starting \(deviceName)..."
         statusIsError = false
         isSwitchingCamera = true
+        hasReceivedCameraFrame = false
         session = nil
         poseDetectionService.reset()
         resetPoseState()
@@ -2106,6 +2171,17 @@ final class CameraModel: ObservableObject {
                 self.isSwitchingCamera = false
             case .failure(let error):
                 DiagnosticLog.log("CameraModel.configureCamera failed device=\(deviceName) error=\(error.localizedDescription)")
+                if allowFallback, let fallback = self.fallbackCamera(excluding: device) {
+                    DiagnosticLog.log("CameraModel.configureCamera retrying with fallback device=\(fallback.localizedName)")
+                    self.statusMessage = self.appLanguage == .russian
+                        ? "\(deviceName) недоступна. Переключаюсь на \(fallback.localizedName)."
+                        : "\(deviceName) is unavailable. Switching to \(fallback.localizedName)."
+                    self.statusIsError = false
+                    self.isSwitchingCamera = false
+                    self.configureCamera(fallback, allowFallback: false)
+                    return
+                }
+
                 self.session = nil
                 self.statusMessage = self.appLanguage == .russian ? "Не удалось запустить камеру: \(error.localizedDescription)" : "Camera could not start: \(error.localizedDescription)"
                 self.statusIsError = true
@@ -2124,15 +2200,20 @@ final class CameraModel: ObservableObject {
         statusMessage = message
         statusIsError = isError
         isSwitchingCamera = false
+        hasReceivedCameraFrame = false
         resetPoseState()
     }
 
     private func applyPoseUpdate(_ update: PoseDetectionUpdate) {
+        hasReceivedCameraFrame = true
         confidence = update.confidence
         isPersonDetected = update.isPersonDetected
         posePoints = update.posePoints
         previewVideoSize = update.videoSize
         updateCoachingMessage()
+        defer {
+            onRecognitionDebugPoseUpdate?(self, update)
+        }
 
         guard exerciseCountingEnabled else {
             updateStartReadiness(with: update)
@@ -2660,11 +2741,23 @@ final class CameraModel: ObservableObject {
         switch selectedMode {
         case .pushUps, .squats, .abs, .burpees, .mountainClimbers, .pikePushUps:
             guard repCount >= targetRepCount else { return }
+            if recognitionDebugSessionActive {
+                workoutCompletionRecorded = true
+                DiagnosticLog.log("recognition debug rep target reached mode=\(selectedMode.rawValue)")
+                onRecognitionDebugStepCompleted?()
+                return
+            }
             completeCurrentStep(amount: repCount)
         case .plank, .tuckPlancheHold, .lSitHold, .elbowLeverHold:
             guard plankTimeRemaining <= 0, plankIsActive else { return }
             if selectedMode == .lSitHold || selectedMode == .elbowLeverHold {
                 DiagnosticLog.log("\(selectedMode.rawValue) hold completed")
+            }
+            if recognitionDebugSessionActive {
+                workoutCompletionRecorded = true
+                DiagnosticLog.log("recognition debug timed target reached mode=\(selectedMode.rawValue)")
+                onRecognitionDebugStepCompleted?()
+                return
             }
             completeCurrentStep(amount: Int(plankDuration.rounded()))
         }
@@ -2891,6 +2984,7 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     let videoOutputQueue = DispatchQueue(label: "BreakGateWorkout.pose.videoOutput", qos: .userInitiated)
 
     var onUpdate: (@MainActor (PoseDetectionUpdate) -> Void)?
+    var onSampleBuffer: ((CMSampleBuffer) -> Void)?
 
     private let bodyPoseRequest = VNDetectHumanBodyPoseRequest()
     private let minimumPointConfidence: Float = 0.25
@@ -3017,6 +3111,8 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        onSampleBuffer?(sampleBuffer)
+
         let now = CACurrentMediaTime()
         diagnosticsFramesSeen += 1
         reportDiagnosticsIfNeeded(now: now)

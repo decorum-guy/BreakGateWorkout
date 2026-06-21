@@ -394,7 +394,7 @@ private struct MenuBarControlView: View {
     }
 
     private var activeGateMenuHeight: CGFloat {
-        170 + CGFloat(max(0, estimatedPlanSummaryLines - 1)) * 18
+        174 + CGFloat(max(0, estimatedPlanSummaryLines - 1)) * 20
     }
 
     private var estimatedPlanSummaryLines: Int {
@@ -406,7 +406,7 @@ private struct MenuBarControlView: View {
         if stepCount <= 3 && summaryLength <= 74 {
             return 2
         }
-        return min(4, max(2, Int(ceil(Double(summaryLength) / 52.0))))
+        return min(6, max(2, Int(ceil(Double(summaryLength) / 44.0))))
     }
 
     @ViewBuilder
@@ -530,7 +530,7 @@ private struct MenuBarControlView: View {
 
                 Text(settings.plan.summary(language))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .lineLimit(4)
+                    .lineLimit(6)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
@@ -663,6 +663,10 @@ private struct MenuBarControlView: View {
 
             Divider().opacity(0.35)
 
+            recognitionImprovementSection
+
+            Divider().opacity(0.35)
+
             gateSettingsSection
 
             Divider().opacity(0.35)
@@ -683,6 +687,28 @@ private struct MenuBarControlView: View {
             .pickerStyle(.menu)
         }
         .menuPanelCard()
+    }
+
+    private var recognitionImprovementSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(language == .russian ? "Помочь улучшить распознавание" : "Help Improve Recognition", systemImage: "figure.run.square.stack")
+                .font(.headline)
+
+            Text(language == .russian
+                ? "Приложение запишет обезличенные данные скелета и решения распознавания во время короткого теста упражнений. Видео и звук не записываются. После теста ты сам решишь, отправлять ли debug-файл разработчику."
+                : "The app will record anonymized skeleton data and recognition decisions during a short exercise test. Video and audio are not recorded. After the test, you choose whether to share the debug file with the developer."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Button {
+                RecognitionDebugWindowController.shared.show(settings: settings)
+            } label: {
+                Label(language == .russian ? "Начать тест распознавания" : "Start Recognition Test", systemImage: "camera.viewfinder")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(MenuActionButtonStyle(kind: .secondary))
+        }
     }
 
     private var gateSettingsSection: some View {
@@ -835,13 +861,22 @@ private struct MenuBarControlView: View {
                 MenuMetricCard(title: ExerciseMode.abs.title(language), value: "\(stats.totalSitUps)", subtitle: L.t(.totalReps, language), systemImage: ExerciseMode.abs.systemImage, color: .purple)
                 MenuMetricCard(title: ExerciseMode.plank.title(language), value: "\(stats.totalPlankSeconds)", subtitle: L.t(.seconds, language), systemImage: ExerciseMode.plank.systemImage, color: .cyan)
                 MenuMetricCard(title: ExerciseMode.burpees.title(language), value: "\(stats.totalBurpees)", subtitle: L.t(.totalReps, language), systemImage: ExerciseMode.burpees.systemImage, color: .pink)
-                if settings.showExperimentalExercises {
-                    GridSectionDivider(title: language == .russian ? "Экспериментальные" : "Experimental")
+            }
+
+            if settings.showExperimentalExercises {
+                GridSectionDivider(title: language == .russian ? "Экспериментальные" : "Experimental")
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 7) {
                     MenuMetricCard(title: ExerciseMode.mountainClimbers.title(language), value: "\(stats.totalMountainClimbers)", subtitle: L.t(.totalReps, language), systemImage: ExerciseMode.mountainClimbers.systemImage, color: .mint)
                     MenuMetricCard(title: ExerciseMode.pikePushUps.title(language), value: "\(stats.totalPikePushUps)", subtitle: L.t(.totalReps, language), systemImage: ExerciseMode.pikePushUps.systemImage, color: .yellow)
                     MenuMetricCard(title: ExerciseMode.lSitHold.title(language), value: "\(stats.totalLSitSeconds)", subtitle: L.t(.seconds, language), systemImage: ExerciseMode.lSitHold.systemImage, color: .indigo)
                     MenuMetricCard(title: ExerciseMode.elbowLeverHold.title(language), value: "\(stats.totalElbowLeverSeconds)", subtitle: L.t(.seconds, language), systemImage: ExerciseMode.elbowLeverHold.systemImage, color: .teal)
                 }
+            }
+
+            GridSectionDivider(title: language == .russian ? "Последняя тренировка" : "Last workout")
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 7) {
                 MenuMetricCard(title: L.t(.last, language), value: stats.lastWorkoutDescription(language), subtitle: L.t(.workout, language), systemImage: "calendar", color: .secondary)
             }
         }
