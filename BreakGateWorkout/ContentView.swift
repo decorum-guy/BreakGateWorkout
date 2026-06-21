@@ -56,6 +56,18 @@ extension RemoteCameraConnectionState {
     }
 }
 
+enum RemoteCameraUIState: Equatable {
+    case notConfigured
+    case notPaired
+    case searching
+    case found
+    case connecting
+    case connected
+    case streaming
+    case reconnecting
+    case error
+}
+
 struct ContentView: View {
     @StateObject private var camera = CameraModel()
     @ObservedObject private var monitor: BreakGateMonitor
@@ -77,6 +89,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .task {
             DiagnosticLog.log("ContentView task started; configuring workout camera")
+            camera.attachSettingsStore(settings)
             camera.setAppLanguage(settings.appLanguage)
             camera.setStartPoseWaitDuration(settings.startPoseWaitDuration.timeInterval)
             camera.setExperimentalExercisesVisible(settings.showExperimentalExercises)
@@ -948,24 +961,22 @@ private struct CameraControlPanel: View {
                             camera.selectCameraSourceMode(.iPhoneStreamBeta)
                         }
 
-                        Button {
-                            if camera.cameraSourceMode == .iPhoneStreamBeta {
-                                camera.reconnectRemoteCamera()
-                            } else {
+                        if camera.cameraSourceMode == .localContinuity {
+                            Button {
                                 camera.refreshCameraDevices()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.callout.weight(.semibold))
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.white.opacity(0.07), in: Circle())
+                                    .overlay {
+                                        Circle()
+                                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                                    }
                             }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.callout.weight(.semibold))
-                                .frame(width: 36, height: 36)
-                                .background(Color.white.opacity(0.07), in: Circle())
-                                .overlay {
-                                    Circle()
-                                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-                                }
+                            .buttonStyle(.plain)
+                            .help(camera.appLanguage == .russian ? "Обновить" : "Refresh")
                         }
-                        .buttonStyle(.plain)
-                        .help(camera.appLanguage == .russian ? "Обновить / переподключить" : "Refresh / reconnect")
                     }
                 }
 
@@ -975,7 +986,9 @@ private struct CameraControlPanel: View {
                     iPhoneStreamControls(camera: camera)
                 }
 
-                ZoomControlPanel(camera: camera)
+                if camera.cameraSourceMode == .localContinuity || camera.remoteUIState == .connected || camera.remoteUIState == .streaming {
+                    ZoomControlPanel(camera: camera)
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(camera.appLanguage == .russian ? "Тренировка" : "Workout")
@@ -1130,12 +1143,12 @@ private struct iPhoneStreamControls: View {
                 Text(camera.appLanguage == .russian ? "iPhone Stream (бета)" : "iPhone Stream (beta)")
                     .font(.headline.weight(.semibold))
                 Spacer()
-                Text(camera.remoteConnectionState.localizedTitle(camera.appLanguage))
+                Text(remoteStateTitle)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(camera.remoteConnectionState == .failed ? .red : .secondary)
+                    .foregroundStyle(camera.remoteUIState == .error ? .red : .secondary)
             }
 
-            if let deviceName = camera.remoteConnectedDeviceName ?? camera.remoteDiscoveredDeviceName {
+            if let deviceName = camera.remoteSelectedPhoneName {
                 Label(deviceName, systemImage: "iphone")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -1149,63 +1162,46 @@ private struct iPhoneStreamControls: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    if camera.remoteDiscoveredDeviceName != nil {
-                        camera.connectToDiscoveredIPhone()
-                    } else {
-                        camera.reconnectRemoteCamera()
-                    }
-                } label: {
-                    Text(camera.appLanguage == .russian ? "Подключить" : "Connect")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 9)
-                .background(Color.white.opacity(0.07), in: Capsule())
-                .disabled(camera.remoteConnectionState == .connecting)
-
-                Button {
-                    camera.reconnectRemoteCamera()
-                } label: {
-                    Text(camera.appLanguage == .russian ? "Переподключить" : "Reconnect")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 9)
-                .background(Color.white.opacity(0.07), in: Capsule())
+            Button {
+                camera.performRemotePrimaryAction()
+            } label: {
+                Text(camera.remotePrimaryActionTitle)
+                    .frame(maxWidth: .infinity)
             }
-
-            HStack(spacing: 8) {
-                Button {
-                    camera.startRemoteStream()
-                } label: {
-                    Text(camera.appLanguage == .russian ? "Начать трансляцию" : "Start Stream")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 9)
-                .background(Color.green.opacity(0.18), in: Capsule())
-
-                Button {
-                    camera.stopRemoteStream()
-                } label: {
-                    Text(camera.appLanguage == .russian ? "Остановить трансляцию" : "Stop Stream")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 9)
-                .background(Color.red.opacity(0.18), in: Capsule())
-            }
+            .buttonStyle(.plain)
+            .padding(.vertical, 11)
+            .background(camera.remotePrimaryActionIsDestructive ? Color.red.opacity(0.18) : Color.green.opacity(0.18), in: Capsule())
+            .disabled(!camera.remotePrimaryActionEnabled)
 
             if let metadata = camera.remoteFrameMetadata {
-                Text("\(camera.appLanguage == .russian ? "FPS / разрешение" : "FPS / Resolution"): \(metadata.fpsApprox ?? 0, specifier: "%.1f") • \(metadata.captureWidth)x\(metadata.captureHeight)")
+                Text("\(camera.appLanguage == .russian ? "FPS / разрешение" : "FPS / Resolution"): \(metadata.fpsApprox ?? 0, specifier: "%.1f") • \(metadata.displayWidth)x\(metadata.displayHeight) • \(metadata.remoteOrientation) • \(metadata.zoomLabel)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(12)
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var remoteStateTitle: String {
+        switch camera.remoteUIState {
+        case .notConfigured, .notPaired:
+            return camera.appLanguage == .russian ? "Не настроено" : "Not paired"
+        case .searching:
+            return camera.appLanguage == .russian ? "Ищу iPhone" : "Looking for iPhone"
+        case .found:
+            return camera.appLanguage == .russian ? "iPhone найден" : "iPhone found"
+        case .connecting:
+            return camera.appLanguage == .russian ? "Подключение..." : "Connecting..."
+        case .connected:
+            return camera.appLanguage == .russian ? "Подключено" : "Connected"
+        case .streaming:
+            return camera.appLanguage == .russian ? "Трансляция" : "Streaming"
+        case .reconnecting:
+            return camera.appLanguage == .russian ? "Переподключение..." : "Reconnecting..."
+        case .error:
+            return camera.appLanguage == .russian ? "Ошибка" : "Error"
+        }
     }
 }
 
@@ -1775,6 +1771,7 @@ final class SoundFeedbackService {
 
 @MainActor
 final class CameraModel: ObservableObject {
+    private(set) var settingsStore = WorkoutSettingsStore()
     static let isEmergencyUnlockEnabled = true
 
     @Published private(set) var session: AVCaptureSession?
@@ -1804,11 +1801,14 @@ final class CameraModel: ObservableObject {
     @Published private(set) var remoteConnectionState: RemoteCameraConnectionState = .disconnected
     @Published private(set) var remoteStatusMessage = ""
     @Published private(set) var remotePreviewImage: NSImage?
+    @Published private(set) var remoteDiscoveredDeviceID: String?
     @Published private(set) var remoteDiscoveredDeviceName: String?
+    @Published private(set) var remoteConnectedDeviceID: String?
     @Published private(set) var remoteConnectedDeviceName: String?
     @Published private(set) var remoteAvailableZoomLevels: [RemoteCameraZoomLevel] = []
     @Published private(set) var remoteFrameMetadata: RemoteCameraFrameMetadata?
     @Published private(set) var hasReceivedCameraFrame = false
+    @Published private(set) var remoteUIState: RemoteCameraUIState = .searching
     @Published private(set) var plankTimeRemaining: Double = 0
     @Published private(set) var plankIsActive = false
     @Published private(set) var coachingMessage: String?
@@ -1839,6 +1839,43 @@ final class CameraModel: ObservableObject {
 
     var previewPlaceholder: String {
         statusIsError ? statusMessage : "No camera preview"
+    }
+
+    var remotePairedPhoneName: String? {
+        settingsStore.pairedIPhoneState.pairedPhoneDisplayName ?? settingsStore.pairedIPhoneState.pairedPhoneName
+    }
+
+    var remoteSelectedPhoneName: String? {
+        remoteConnectedDeviceName ?? remoteDiscoveredDeviceName ?? remotePairedPhoneName
+    }
+
+    var remotePrimaryActionTitle: String {
+        switch remoteUIState {
+        case .notConfigured, .notPaired:
+            return appLanguage == .russian ? "Настроить iPhone Stream" : "Set up iPhone Stream"
+        case .searching:
+            return appLanguage == .russian ? "Ищу iPhone…" : "Looking for iPhone…"
+        case .found:
+            return appLanguage == .russian ? "Подключить" : "Connect"
+        case .connecting:
+            return appLanguage == .russian ? "Подключение…" : "Connecting…"
+        case .connected:
+            return appLanguage == .russian ? "Начать трансляцию" : "Start Stream"
+        case .streaming:
+            return appLanguage == .russian ? "Остановить трансляцию" : "Stop Stream"
+        case .reconnecting:
+            return appLanguage == .russian ? "Переподключение…" : "Reconnecting…"
+        case .error:
+            return appLanguage == .russian ? "Переподключить" : "Reconnect"
+        }
+    }
+
+    var remotePrimaryActionEnabled: Bool {
+        remoteUIState != .connecting && remoteUIState != .searching && remoteUIState != .reconnecting
+    }
+
+    var remotePrimaryActionIsDestructive: Bool {
+        remoteUIState == .streaming
     }
 
     var selectedDeviceIsIPhone: Bool {
@@ -2014,6 +2051,11 @@ final class CameraModel: ObservableObject {
     private var voiceStartRequested = false
     private var automaticStartWindowExpired = false
     private var recognitionDebugSessionActive = false
+    private var remoteDecodedFrames = 0
+    private var remoteVisionFrames = 0
+    private var remoteDiagnosticsWindowStart = CACurrentMediaTime()
+    private var lastRemoteFrameLogDate = Date.distantPast
+    private var lastRemoteConnectionState: RemoteCameraConnectionState?
     var onRecognitionDebugPoseUpdate: ((CameraModel, PoseDetectionUpdate) -> Void)?
     var onRecognitionDebugStepCompleted: (() -> Void)?
     var onRecognitionDebugVideoSampleBuffer: ((CMSampleBuffer) -> Void)?
@@ -2044,6 +2086,10 @@ final class CameraModel: ObservableObject {
         }
         poseDetectionService.setMode(selectedMode)
         resetWorkoutState()
+    }
+
+    func attachSettingsStore(_ settings: WorkoutSettingsStore) {
+        settingsStore = settings
     }
 
     func start() async {
@@ -2312,6 +2358,7 @@ final class CameraModel: ObservableObject {
             remoteFrameMetadata = nil
             remoteConnectionState = .disconnected
             remoteStatusMessage = ""
+            updateRemoteUIState()
             hasReceivedCameraFrame = false
             Task { [weak self] in
                 await self?.start()
@@ -2325,31 +2372,86 @@ final class CameraModel: ObservableObject {
                 ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac."
                 : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac."
             statusIsError = false
+            updateRemoteUIState()
             remoteTransport.reconnect()
         }
     }
 
     func reconnectRemoteCamera() {
         cameraSourceMode = .iPhoneStreamBeta
+        remoteUIState = .reconnecting
+        print("BreakGateWorkout remote: connection state=reconnecting")
         remoteTransport.reconnect()
+    }
+
+    func performRemotePrimaryAction() {
+        switch remoteUIState {
+        case .notConfigured, .notPaired:
+            print("BreakGateWorkout remote: setup opened")
+            AppSettingsWindowController.shared.show(settings: settingsStore)
+        case .found:
+            connectToDiscoveredIPhone()
+        case .searching, .connecting, .reconnecting:
+            break
+        case .connected:
+            startRemoteStream()
+        case .streaming:
+            stopRemoteStream()
+        case .error:
+            reconnectRemoteCamera()
+        }
     }
 
     func connectToDiscoveredIPhone() {
         cameraSourceMode = .iPhoneStreamBeta
-        remoteTransport.inviteNearbyPeer()
+        if let pairedName = remotePairedPhoneName, pairedName == remoteDiscoveredDeviceName {
+            remoteTransport.invitePeer(named: pairedName)
+        } else {
+            remoteTransport.inviteNearbyPeer()
+        }
     }
 
     func startRemoteStream() {
         let sessionID = UUID().uuidString
+        print("BreakGateWorkout remote: stream start requested")
         remoteTransport.send(.control(.startStream(sessionID: sessionID)))
     }
 
     func stopRemoteStream() {
+        print("BreakGateWorkout remote: stream stopped")
         remoteTransport.send(.control(.stopStream))
     }
 
     func setRemoteZoomLevel(_ level: RemoteCameraZoomLevel) {
         remoteTransport.send(.control(.setZoom(level: level)))
+    }
+
+    private func updateRemoteUIState() {
+        if remoteConnectionState == .failed {
+            remoteUIState = .error
+            return
+        }
+        if remoteConnectionState == .connecting {
+            remoteUIState = .connecting
+            return
+        }
+        if remoteConnectionState == .connected {
+            remoteUIState = .connected
+            return
+        }
+        if remoteConnectionState == .streaming {
+            remoteUIState = .streaming
+            return
+        }
+        if remotePairedPhoneName == nil {
+            remoteUIState = .notPaired
+            return
+        }
+        if remoteDiscoveredDeviceName != nil || remoteConnectedDeviceName != nil {
+            remoteUIState = .found
+            return
+        }
+        remoteUIState = .searching
     }
 
     func setDebugPanelVisible(_ isVisible: Bool) {
@@ -4830,9 +4932,27 @@ extension CameraModel: RemoteCameraTransportDelegate {
     func remoteCameraTransport(_ transport: RemoteCameraTransport, didChangeSnapshot snapshot: RemoteCameraSessionSnapshot) {
         remoteConnectionState = snapshot.connectionState
         remoteStatusMessage = snapshot.statusText
+        remoteDiscoveredDeviceID = snapshot.discoveredDeviceID
         remoteDiscoveredDeviceName = snapshot.discoveredDeviceName
+        remoteConnectedDeviceID = snapshot.connectedDeviceID
         remoteConnectedDeviceName = snapshot.connectedDeviceName
         remoteAvailableZoomLevels = snapshot.availableZoomLevels
+        if lastRemoteConnectionState != snapshot.connectionState {
+            lastRemoteConnectionState = snapshot.connectionState
+            print("BreakGateWorkout remote: connection state=\(snapshot.connectionState.rawValue)")
+        }
+        if let name = snapshot.connectedDeviceName ?? snapshot.discoveredDeviceName {
+            settingsStore.updatePairedIPhone { state in
+                if state.pairedPhoneName == name || state.pairedPhoneDisplayName == name {
+                    state.lastSeenAt = Date()
+                    state.lastConnectionState = snapshot.connectionState.rawValue
+                    if snapshot.connectionState == .connected || snapshot.connectionState == .streaming {
+                        state.lastConnectedAt = Date()
+                    }
+                }
+            }
+        }
+        updateRemoteUIState()
         if cameraSourceMode == .iPhoneStreamBeta {
             selectedCameraName = snapshot.connectedDeviceName ?? snapshot.discoveredDeviceName ?? (appLanguage == .russian ? "iPhone Stream (бета)" : "iPhone Stream (beta)")
             statusMessage = snapshot.statusText.isEmpty
@@ -4845,12 +4965,15 @@ extension CameraModel: RemoteCameraTransportDelegate {
         remoteFrameMetadata = metadata
         selectedCameraName = metadata.deviceName
         zoomFactor = CGFloat(metadata.zoomFactor)
-        previewVideoSize = CGSize(width: metadata.captureWidth, height: metadata.captureHeight)
+        previewVideoSize = CGSize(width: metadata.displayWidth, height: metadata.displayHeight)
         hasReceivedCameraFrame = true
+        remoteConnectionState = .streaming
+        updateRemoteUIState()
 
         guard cameraSourceMode == .iPhoneStreamBeta else { return }
 
         if let image = NSImage(data: jpegData) {
+            remoteDecodedFrames += 1
             remotePreviewImage = image
             statusMessage = appLanguage == .russian
                 ? "Трансляция с iPhone активна"
@@ -4858,8 +4981,10 @@ extension CameraModel: RemoteCameraTransportDelegate {
             statusIsError = false
 
             if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                remoteVisionFrames += 1
                 poseDetectionService.processRemoteFrame(cgImage: cgImage, metadata: metadata)
             }
+            reportRemoteFrameDiagnostics(metadata: metadata, jpegByteCount: jpegData.count)
         }
     }
 
@@ -4870,5 +4995,48 @@ extension CameraModel: RemoteCameraTransportDelegate {
         default:
             break
         }
+    }
+
+    private func reportRemoteFrameDiagnostics(metadata: RemoteCameraFrameMetadata, jpegByteCount: Int) {
+        let now = Date()
+        let elapsed = CACurrentMediaTime() - remoteDiagnosticsWindowStart
+        let latency = max(0, now.timeIntervalSince1970 - metadata.timestampSeconds) * 1000
+        if now.timeIntervalSince(lastRemoteFrameLogDate) >= 1 || metadata.frameIndex % 30 == 0 {
+            lastRemoteFrameLogDate = now
+            print(
+                String(
+                    format: "BreakGateWorkout remote: frame received index=%d size=%d orientation=%@ zoom=%@ latency=%.0fms resolution=%dx%d display=%dx%d mirrored=%@ lens=%@",
+                    metadata.frameIndex,
+                    jpegByteCount,
+                    metadata.remoteOrientation,
+                    metadata.zoomLabel,
+                    latency,
+                    metadata.captureWidth,
+                    metadata.captureHeight,
+                    metadata.displayWidth,
+                    metadata.displayHeight,
+                    metadata.isMirrored ? "true" : "false",
+                    metadata.lensType
+                )
+            )
+        }
+        guard elapsed >= 1 else { return }
+        let fps = Double(remoteDecodedFrames) / elapsed
+        let visionFPS = Double(remoteVisionFrames) / elapsed
+        print(
+            String(
+                format: "BreakGateWorkout remote: fps=%.1f decoded=%d vision=%.1f orientation=%@ resolution=%dx%d zoom=%@",
+                fps,
+                remoteDecodedFrames,
+                visionFPS,
+                metadata.remoteOrientation,
+                metadata.captureWidth,
+                metadata.captureHeight,
+                metadata.zoomLabel
+            )
+        )
+        remoteDecodedFrames = 0
+        remoteVisionFrames = 0
+        remoteDiagnosticsWindowStart = CACurrentMediaTime()
     }
 }

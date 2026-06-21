@@ -2028,6 +2028,17 @@ enum StartPoseWaitDuration: Int, CaseIterable, Identifiable, Codable {
 
 @MainActor
 final class WorkoutSettingsStore: ObservableObject {
+    struct PairedIPhoneState: Codable, Equatable {
+        var pairedPhoneID: String?
+        var pairedPhoneName: String?
+        var pairedPhoneDisplayName: String?
+        var pairingToken: String?
+        var lastConnectedAt: Date?
+        var lastSeenAt: Date?
+        var lastConnectionState: String?
+        var autoConnectEnabled = true
+    }
+
     @Published var plan: WorkoutPlan {
         didSet { save() }
     }
@@ -2082,6 +2093,9 @@ final class WorkoutSettingsStore: ObservableObject {
     @Published var showExperimentalExercises: Bool {
         didSet { save() }
     }
+    @Published var pairedIPhoneState: PairedIPhoneState {
+        didSet { save() }
+    }
     @Published private(set) var launchAtLoginErrorMessage: String?
 
     private let defaults = UserDefaults.standard
@@ -2100,6 +2114,7 @@ final class WorkoutSettingsStore: ObservableObject {
     private let startPoseWaitDurationKey = "BreakGateWorkout.startPoseWaitDuration"
     private let userDisplayNameKey = "BreakGateWorkout.userDisplayName"
     private let showExperimentalExercisesKey = "BreakGateWorkout.showExperimentalExercises"
+    private let pairedIPhoneStateKey = "BreakGateWorkout.pairedIPhoneState"
 
     init() {
         if let data = defaults.data(forKey: planKey),
@@ -2178,6 +2193,12 @@ final class WorkoutSettingsStore: ObservableObject {
         }
         userDisplayName = defaults.string(forKey: userDisplayNameKey) ?? ""
         showExperimentalExercises = defaults.bool(forKey: showExperimentalExercisesKey)
+        if let data = defaults.data(forKey: pairedIPhoneStateKey),
+           let decoded = try? JSONDecoder().decode(PairedIPhoneState.self, from: data) {
+            pairedIPhoneState = decoded
+        } else {
+            pairedIPhoneState = PairedIPhoneState()
+        }
 
         normalizePlan()
         applySoundSettings()
@@ -2312,6 +2333,16 @@ final class WorkoutSettingsStore: ObservableObject {
         self.rewardSettings = rewardSettings
     }
 
+    func updatePairedIPhone(_ update: (inout PairedIPhoneState) -> Void) {
+        var next = pairedIPhoneState
+        update(&next)
+        pairedIPhoneState = next
+    }
+
+    func forgetPairedIPhone() {
+        pairedIPhoneState = PairedIPhoneState(autoConnectEnabled: true)
+    }
+
     func resetToDefaults() {
         plan = .defaultPlan(for: .light)
         rewardSettings = Self.defaultRewardSettings()
@@ -2379,6 +2410,9 @@ final class WorkoutSettingsStore: ObservableObject {
         defaults.set(startPoseWaitDuration.rawValue, forKey: startPoseWaitDurationKey)
         defaults.set(userDisplayName, forKey: userDisplayNameKey)
         defaults.set(showExperimentalExercises, forKey: showExperimentalExercisesKey)
+        if let pairedData = try? JSONEncoder().encode(pairedIPhoneState) {
+            defaults.set(pairedData, forKey: pairedIPhoneStateKey)
+        }
     }
 }
 
@@ -2469,94 +2503,343 @@ final class AppSettingsWindowController {
 private struct AppSettingsView: View {
     @ObservedObject var settings: WorkoutSettingsStore
     let onClose: () -> Void
+    @StateObject private var remoteSetup = RemoteCameraSetupModel()
 
     private var language: AppLanguage { settings.appLanguage }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(language == .russian ? "Настройки BreakGate" : "BreakGate Settings")
-                .font(.title2.weight(.bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(language == .russian ? "Настройки BreakGate" : "BreakGate Settings")
+                    .font(.title2.weight(.bold))
 
-            VStack(alignment: .leading, spacing: 10) {
-                Picker(L.t(.language, language), selection: Binding(
-                    get: { settings.appLanguage },
-                    set: { settings.setAppLanguageSafely($0) }
-                )) {
-                    ForEach(AppLanguage.allCases) { appLanguage in
-                        Text(appLanguage.title).tag(appLanguage)
+                VStack(alignment: .leading, spacing: 10) {
+                    Picker(L.t(.language, language), selection: Binding(
+                        get: { settings.appLanguage },
+                        set: { settings.setAppLanguageSafely($0) }
+                    )) {
+                        ForEach(AppLanguage.allCases) { appLanguage in
+                            Text(appLanguage.title).tag(appLanguage)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
+                    .pickerStyle(.segmented)
 
-                Toggle(L.t(.voice, language), isOn: Binding(
-                    get: { settings.isVoiceControlEnabled },
-                    set: { settings.setVoiceControlEnabledSafely($0) }
-                ))
-                Toggle(L.t(.runOnStartup, language), isOn: Binding(
-                    get: { settings.runOnStartupEnabled },
-                    set: { settings.setLaunchAtLoginEnabledSafely($0) }
-                ))
-                Toggle(language == .russian ? "Ставить медиа на паузу при гейте" : "Pause media when gate opens", isOn: Binding(
-                    get: { settings.autoPauseMediaOnGate },
-                    set: { settings.setAutoPauseMediaOnGateSafely($0) }
-                ))
-                Text(language == .russian ? "Если включено, macOS попросит Accessibility доступ для отправки media play/pause." : "When enabled, macOS needs Accessibility access to send the media play/pause key.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Toggle(L.t(.voice, language), isOn: Binding(
+                        get: { settings.isVoiceControlEnabled },
+                        set: { settings.setVoiceControlEnabledSafely($0) }
+                    ))
+                    Toggle(L.t(.runOnStartup, language), isOn: Binding(
+                        get: { settings.runOnStartupEnabled },
+                        set: { settings.setLaunchAtLoginEnabledSafely($0) }
+                    ))
+                    Toggle(language == .russian ? "Ставить медиа на паузу при гейте" : "Pause media when gate opens", isOn: Binding(
+                        get: { settings.autoPauseMediaOnGate },
+                        set: { settings.setAutoPauseMediaOnGateSafely($0) }
+                    ))
+                    Text(language == .russian ? "Если включено, macOS попросит Accessibility доступ для отправки media play/pause." : "When enabled, macOS needs Accessibility access to send the media play/pause key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                TextField(language == .russian ? "Имя для статистики" : "Stats display name", text: Binding(
-                    get: { settings.userDisplayName },
-                    set: { settings.setUserDisplayNameSafely($0) }
-                ))
-                .textFieldStyle(.roundedBorder)
+                    TextField(language == .russian ? "Имя для статистики" : "Stats display name", text: Binding(
+                        get: { settings.userDisplayName },
+                        set: { settings.setUserDisplayNameSafely($0) }
+                    ))
+                    .textFieldStyle(.roundedBorder)
 
-                Picker(language == .russian ? "Ожидание исходной позы" : "Starting pose wait", selection: Binding(
-                    get: { settings.startPoseWaitDuration },
-                    set: { settings.setStartPoseWaitDurationSafely($0) }
-                )) {
-                    ForEach(StartPoseWaitDuration.allCases) { duration in
-                        Text(duration.title(language)).tag(duration)
+                    Picker(language == .russian ? "Ожидание исходной позы" : "Starting pose wait", selection: Binding(
+                        get: { settings.startPoseWaitDuration },
+                        set: { settings.setStartPoseWaitDurationSafely($0) }
+                    )) {
+                        ForEach(StartPoseWaitDuration.allCases) { duration in
+                            Text(duration.title(language)).tag(duration)
+                        }
                     }
-                }
-                .pickerStyle(.menu)
+                    .pickerStyle(.menu)
 
-                Toggle(language == .russian ? "Показывать экспериментальные упражнения" : "Show experimental exercises", isOn: Binding(
-                    get: { settings.showExperimentalExercises },
-                    set: { settings.setShowExperimentalExercisesSafely($0) }
-                ))
+                    Toggle(language == .russian ? "Показывать экспериментальные упражнения" : "Show experimental exercises", isOn: Binding(
+                        get: { settings.showExperimentalExercises },
+                        set: { settings.setShowExperimentalExercisesSafely($0) }
+                    ))
+                }
+                .configurationCard()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(language == .russian ? "Чувствительность скоринга" : "Scoring Sensitivity")
+                        .font(.headline)
+                    Text(language == .russian ? "Как быстро растет давление, пока ты продолжаешь работать без перерыва." : "How quickly pressure builds while you keep working without a break.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(language == .russian ? "Чувствительность" : "Sensitivity", selection: Binding(
+                        get: { settings.scoringSensitivity },
+                        set: { settings.setScoringSensitivitySafely($0) }
+                    )) {
+                        ForEach(ScoringSensitivity.allCases) { sensitivity in
+                            Text("\(sensitivity.title(language)) (\(sensitivity.multiplier, specifier: "%.1f")x)").tag(sensitivity)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .configurationCard()
+
+                IPhoneStreamSetupCard(settings: settings, model: remoteSetup, language: language)
+
+                HStack {
+                    Spacer()
+                    Button(language == .russian ? "Готово" : "Done") {
+                        onClose()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
             }
-            .configurationCard()
+            .padding(20)
+        }
+        .frame(width: 520, height: 700)
+        .task {
+            remoteSetup.setLanguage(language)
+            remoteSetup.applyPairedState(settings.pairedIPhoneState)
+            remoteSetup.start()
+        }
+        .onChange(of: settings.appLanguage) { _, nextLanguage in
+            remoteSetup.setLanguage(nextLanguage)
+        }
+        .onChange(of: settings.pairedIPhoneState) { _, pairedState in
+            remoteSetup.applyPairedState(pairedState)
+        }
+        .onChange(of: remoteSetup.persistedPairedState) { _, pairedState in
+            guard let pairedState else { return }
+            settings.pairedIPhoneState = pairedState
+        }
+    }
+}
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(language == .russian ? "Чувствительность скоринга" : "Scoring Sensitivity")
-                    .font(.headline)
-                Text(language == .russian ? "Как быстро растет давление, пока ты продолжаешь работать без перерыва." : "How quickly pressure builds while you keep working without a break.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker(language == .russian ? "Чувствительность" : "Sensitivity", selection: Binding(
-                    get: { settings.scoringSensitivity },
-                    set: { settings.setScoringSensitivitySafely($0) }
-                )) {
-                    ForEach(ScoringSensitivity.allCases) { sensitivity in
-                        Text("\(sensitivity.title(language)) (\(sensitivity.multiplier, specifier: "%.1f")x)").tag(sensitivity)
-                    }
-                }
-                .pickerStyle(.menu)
+@MainActor
+final class RemoteCameraSetupModel: NSObject, ObservableObject {
+    @Published private(set) var connectionState: RemoteCameraConnectionState = .disconnected
+    @Published private(set) var discoveredDeviceName: String?
+    @Published private(set) var discoveredDeviceID: String?
+    @Published private(set) var connectedDeviceName: String?
+    @Published private(set) var connectedDeviceID: String?
+    @Published private(set) var statusMessage: String?
+    @Published private(set) var isTestingStream = false
+    @Published private(set) var persistedPairedState: WorkoutSettingsStore.PairedIPhoneState?
+
+    private let transport = RemoteCameraTransport(
+        role: .macHost,
+        displayName: Host.current().localizedName ?? "BreakGateWorkout Mac"
+    )
+    private var language: AppLanguage = .english
+    private var pairedState = WorkoutSettingsStore.PairedIPhoneState()
+
+    var localizedStatusTitle: String {
+        switch connectionState {
+        case .disconnected:
+            return language == .russian ? "Не готово" : "Not ready"
+        case .browsing:
+            return language == .russian ? "Поиск" : "Searching"
+        case .connecting:
+            return language == .russian ? "Подключение" : "Connecting"
+        case .connected:
+            return language == .russian ? "Подключено" : "Connected"
+        case .streaming:
+            return language == .russian ? "Трансляция" : "Streaming"
+        case .failed:
+            return language == .russian ? "Ошибка" : "Error"
+        }
+    }
+
+    var canPair: Bool {
+        discoveredDeviceName != nil || connectedDeviceName != nil
+    }
+
+    var canControlStream: Bool {
+        connectionState == .connected || connectionState == .streaming
+    }
+
+    override init() {
+        super.init()
+        transport.delegate = self
+    }
+
+    func start() {
+        transport.start()
+    }
+
+    func setLanguage(_ language: AppLanguage) {
+        self.language = language
+    }
+
+    func applyPairedState(_ state: WorkoutSettingsStore.PairedIPhoneState) {
+        pairedState = state
+    }
+
+    func findIPhone() {
+        transport.reconnect()
+    }
+
+    func pairCurrentIPhone() {
+        var next = pairedState
+        next.pairedPhoneID = connectedDeviceID ?? discoveredDeviceID ?? connectedDeviceName ?? discoveredDeviceName
+        next.pairedPhoneName = connectedDeviceName ?? discoveredDeviceName
+        next.pairedPhoneDisplayName = connectedDeviceName ?? discoveredDeviceName
+        next.lastSeenAt = Date()
+        next.lastConnectionState = connectionState.rawValue
+        persistedPairedState = next
+        pairedState = next
+    }
+
+    func forgetIPhone() {
+        pairedState = .init(autoConnectEnabled: true)
+        persistedPairedState = pairedState
+    }
+
+    func testConnection() {
+        if let rememberedName = pairedState.pairedPhoneDisplayName ?? pairedState.pairedPhoneName {
+            transport.invitePeer(named: rememberedName)
+        } else if discoveredDeviceName != nil {
+            transport.inviteNearbyPeer()
+        } else {
+            transport.reconnect()
+        }
+    }
+
+    func toggleTestStream() {
+        if isTestingStream {
+            transport.send(.control(.stopStream))
+            isTestingStream = false
+        } else {
+            transport.send(.control(.startStream(sessionID: UUID().uuidString)))
+            isTestingStream = true
+        }
+    }
+}
+
+extension RemoteCameraSetupModel: RemoteCameraTransportDelegate {
+    func remoteCameraTransport(_ transport: RemoteCameraTransport, didChangeSnapshot snapshot: RemoteCameraSessionSnapshot) {
+        connectionState = snapshot.connectionState
+        discoveredDeviceName = snapshot.discoveredDeviceName
+        discoveredDeviceID = snapshot.discoveredDeviceID
+        connectedDeviceName = snapshot.connectedDeviceName
+        connectedDeviceID = snapshot.connectedDeviceID
+        statusMessage = snapshot.statusText
+
+        var next = pairedState
+        if let name = snapshot.connectedDeviceName ?? snapshot.discoveredDeviceName {
+            next.lastSeenAt = Date()
+            next.lastConnectionState = snapshot.connectionState.rawValue
+            if snapshot.connectionState == .connected || snapshot.connectionState == .streaming {
+                next.lastConnectedAt = Date()
             }
-            .configurationCard()
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                Button(language == .russian ? "Готово" : "Done") {
-                    onClose()
-                }
-                .keyboardShortcut(.defaultAction)
+            if next.pairedPhoneName == name || next.pairedPhoneDisplayName == name {
+                persistedPairedState = next
+                pairedState = next
             }
         }
-        .padding(20)
-        .frame(width: 440, height: 520)
+        if snapshot.connectionState != .streaming {
+            isTestingStream = false
+        }
+    }
+
+    func remoteCameraTransport(_ transport: RemoteCameraTransport, didReceiveFrame metadata: RemoteCameraFrameMetadata, jpegData: Data) {}
+
+    func remoteCameraTransport(_ transport: RemoteCameraTransport, didReceiveControl control: RemoteCameraControlMessage) {}
+}
+
+private struct IPhoneStreamSetupCard: View {
+    @ObservedObject var settings: WorkoutSettingsStore
+    @ObservedObject var model: RemoteCameraSetupModel
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(language == .russian ? "Настройка iPhone Stream" : "iPhone Stream Setup")
+                .font(.headline)
+            Text(language == .russian
+                ? "iPhone будет работать как камера-спутник для Mac."
+                : "Your iPhone works as a camera satellite for this Mac."
+            )
+            .font(.subheadline.weight(.semibold))
+            Text(language == .russian
+                ? "Один раз открой приложение BreakGateWorkoutPhone на iPhone и разреши камеру/локальную сеть."
+                : "Open BreakGateWorkoutPhone on your iPhone once and allow camera/local network access."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text(language == .russian
+                ? "После привязки Mac будет сам искать этот iPhone."
+                : "After pairing, the Mac will look for this iPhone automatically."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(language == .russian ? "Шаг 1: Открой приложение на iPhone" : "Step 1: Open the iPhone app")
+                Text(language == .russian ? "Шаг 2: Найди iPhone" : "Step 2: Find iPhone")
+                Text(language == .russian ? "Шаг 3: Привяжи этот iPhone" : "Step 3: Pair this iPhone")
+                Text(language == .russian ? "Шаг 4: Проверь трансляцию" : "Step 4: Test stream")
+            }
+            .font(.caption.weight(.semibold))
+
+            if let pairedName = settings.pairedIPhoneState.pairedPhoneDisplayName ?? settings.pairedIPhoneState.pairedPhoneName {
+                Text("\(language == .russian ? "Привязанный iPhone" : "Paired iPhone"): \(pairedName)")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            Text("\(language == .russian ? "Статус" : "Status"): \(model.localizedStatusTitle)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(model.connectionState == .failed ? .red : .primary)
+
+            if let statusMessage = model.statusMessage, !statusMessage.isEmpty {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.connectionState == .failed && model.statusMessage?.localizedCaseInsensitiveContains("network") == true {
+                Text(language == .russian
+                    ? "Разреши доступ к локальной сети в системных настройках, затем попробуй снова."
+                    : "Allow Local Network access in System Settings, then try again."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button(language == .russian ? "Найти iPhone" : "Find iPhone") {
+                    model.findIPhone()
+                }
+                Button(language == .russian ? "Привязать iPhone" : "Pair iPhone") {
+                    model.pairCurrentIPhone()
+                }
+                .disabled(!model.canPair)
+                Button(language == .russian ? "Забыть iPhone" : "Forget iPhone") {
+                    model.forgetIPhone()
+                    settings.forgetPairedIPhone()
+                }
+                .disabled(settings.pairedIPhoneState.pairedPhoneName == nil && settings.pairedIPhoneState.pairedPhoneID == nil)
+            }
+            .buttonStyle(.bordered)
+
+            HStack(spacing: 8) {
+                Button(language == .russian ? "Проверить соединение" : "Test connection") {
+                    model.testConnection()
+                }
+                Button(model.isTestingStream
+                       ? (language == .russian ? "Остановить трансляцию" : "Stop stream")
+                       : (language == .russian ? "Начать тестовую трансляцию" : "Start test stream")) {
+                    model.toggleTestStream()
+                }
+                .disabled(!model.canControlStream)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Text(language == .russian
+                ? "Открой эту ссылку на iPhone: breakgatephone://connect"
+                : "Open this link on your iPhone: breakgatephone://connect"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .configurationCard()
     }
 }
 

@@ -88,6 +88,7 @@ final class RemoteCameraTransport: NSObject {
     private(set) var snapshot = RemoteCameraSessionSnapshot()
     private var nearbyPeer: MCPeerID?
     private var connectedPeer: MCPeerID?
+    private var knownPeerIDs: [String: MCPeerID] = [:]
 
     init(role: Role, displayName: String) {
         self.role = role
@@ -115,10 +116,13 @@ final class RemoteCameraTransport: NSObject {
             case .macHost:
                 self.snapshot.connectionState = .browsing
                 self.snapshot.statusText = "Browsing for iPhone"
+                self.log("setup opened")
+                self.log("browsing started")
                 self.serviceBrowser?.startBrowsingForPeers()
             case .phoneCompanion:
                 self.snapshot.connectionState = .disconnected
                 self.snapshot.statusText = "Advertising to Mac"
+                self.log("advertising started")
                 self.serviceAdvertiser?.startAdvertisingPeer()
             }
             self.publishSnapshot()
@@ -135,6 +139,7 @@ final class RemoteCameraTransport: NSObject {
             self.snapshot.connectionState = .disconnected
             self.snapshot.isStreaming = false
             self.snapshot.statusText = "Disconnected"
+            self.log("stream stopped")
             self.publishSnapshot()
         }
     }
@@ -149,8 +154,22 @@ final class RemoteCameraTransport: NSObject {
             guard let browser = self.serviceBrowser, let nearbyPeer = self.nearbyPeer else { return }
             self.snapshot.connectionState = .connecting
             self.snapshot.statusText = "Connecting..."
+            self.log("connection state=connecting peer=\(nearbyPeer.displayName)")
             self.publishSnapshot()
             browser.invitePeer(nearbyPeer, to: self.session, withContext: nil, timeout: 10)
+        }
+    }
+
+    func invitePeer(named deviceName: String) {
+        queue.async {
+            guard let browser = self.serviceBrowser else { return }
+            let peer = self.knownPeerIDs[deviceName] ?? self.nearbyPeer
+            guard let peer else { return }
+            self.snapshot.connectionState = .connecting
+            self.snapshot.statusText = "Connecting..."
+            self.log("connection state=connecting peer=\(peer.displayName)")
+            self.publishSnapshot()
+            browser.invitePeer(peer, to: self.session, withContext: nil, timeout: 10)
         }
     }
 
@@ -163,6 +182,7 @@ final class RemoteCameraTransport: NSObject {
             } catch {
                 self.snapshot.connectionState = .failed
                 self.snapshot.statusText = error.localizedDescription
+                self.log("error=\(error.localizedDescription)")
                 self.publishSnapshot()
             }
         }
@@ -173,21 +193,28 @@ final class RemoteCameraTransport: NSObject {
         case .notConnected:
             connectedPeer = nil
             snapshot.connectionState = nearbyPeer == nil ? .browsing : .disconnected
+            snapshot.connectedDeviceID = nil
             snapshot.connectedDeviceName = nil
             snapshot.isStreaming = false
             snapshot.statusText = "Disconnected"
+            log("connection state=notConnected peer=\(peerID.displayName)")
         case .connecting:
             snapshot.connectionState = .connecting
+            snapshot.connectedDeviceID = peerID.displayName
             snapshot.connectedDeviceName = peerID.displayName
             snapshot.statusText = "Connecting..."
+            log("connection state=connecting peer=\(peerID.displayName)")
         case .connected:
             connectedPeer = peerID
             snapshot.connectionState = .connected
+            snapshot.connectedDeviceID = peerID.displayName
             snapshot.connectedDeviceName = peerID.displayName
             snapshot.statusText = "Connected"
+            log("connection state=connected peer=\(peerID.displayName)")
         @unknown default:
             snapshot.connectionState = .failed
             snapshot.statusText = "Unknown Multipeer state"
+            log("error=unknown Multipeer state peer=\(peerID.displayName)")
         }
         publishSnapshot()
     }
@@ -197,9 +224,13 @@ final class RemoteCameraTransport: NSObject {
             let message = try RemoteCameraTransportCodec.decode(data)
             switch message {
             case .hello(let device):
+                snapshot.discoveredDeviceID = device.id
                 snapshot.discoveredDeviceName = device.name
+                snapshot.connectedDeviceID = device.id
                 snapshot.connectedDeviceName = device.name
+                snapshot.pairingToken = device.pairingToken
                 snapshot.availableZoomLevels = device.supportsZoomLevels
+                log("paired phone=\(device.name)")
                 publishSnapshot()
             case .control(let control):
                 delegate?.remoteCameraTransport(self, didReceiveControl: control)
@@ -207,6 +238,7 @@ final class RemoteCameraTransport: NSObject {
                 snapshot.latestMetadata = metadata
                 snapshot.latestFrameData = jpegData
                 snapshot.latestFrameSize = CGSize(width: metadata.captureWidth, height: metadata.captureHeight)
+                snapshot.connectedDeviceID = connectedPeer?.displayName ?? snapshot.connectedDeviceID
                 snapshot.connectedDeviceName = metadata.deviceName
                 snapshot.isStreaming = true
                 snapshot.connectionState = .streaming
@@ -216,12 +248,27 @@ final class RemoteCameraTransport: NSObject {
             case .status(let state, let description):
                 snapshot.connectionState = state
                 snapshot.statusText = description
+                if state == .streaming {
+                    log("stream started")
+                } else if state == .connected {
+                    log("stream stopped")
+                }
                 publishSnapshot()
             }
         } catch {
             snapshot.connectionState = .failed
             snapshot.statusText = error.localizedDescription
+            log("error=\(error.localizedDescription)")
             publishSnapshot()
+        }
+    }
+
+    private func log(_ message: String) {
+        switch role {
+        case .macHost:
+            print("BreakGateWorkout remote: \(message)")
+        case .phoneCompanion:
+            print("BreakGateWorkoutPhone: \(message)")
         }
     }
 
@@ -237,8 +284,11 @@ extension RemoteCameraTransport: MCNearbyServiceBrowserDelegate {
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
         queue.async {
             self.nearbyPeer = peerID
+            self.knownPeerIDs[peerID.displayName] = peerID
+            self.snapshot.discoveredDeviceID = peerID.displayName
             self.snapshot.discoveredDeviceName = peerID.displayName
             self.snapshot.statusText = "iPhone found"
+            self.log("peer found name=\(peerID.displayName)")
             self.publishSnapshot()
         }
     }
@@ -247,14 +297,18 @@ extension RemoteCameraTransport: MCNearbyServiceBrowserDelegate {
         queue.async {
             if self.nearbyPeer == peerID {
                 self.nearbyPeer = nil
+                self.snapshot.discoveredDeviceID = nil
                 self.snapshot.discoveredDeviceName = nil
             }
             if self.connectedPeer == peerID {
                 self.connectedPeer = nil
+                self.snapshot.connectedDeviceID = nil
                 self.snapshot.connectedDeviceName = nil
                 self.snapshot.connectionState = .disconnected
             }
+            self.knownPeerIDs.removeValue(forKey: peerID.displayName)
             self.snapshot.statusText = "iPhone not found"
+            self.log("connection state=lost peer=\(peerID.displayName)")
             self.publishSnapshot()
         }
     }
@@ -263,6 +317,7 @@ extension RemoteCameraTransport: MCNearbyServiceBrowserDelegate {
         queue.async {
             self.snapshot.connectionState = .failed
             self.snapshot.statusText = error.localizedDescription
+            self.log("error=\(error.localizedDescription)")
             self.publishSnapshot()
         }
     }
@@ -275,6 +330,7 @@ extension RemoteCameraTransport: MCNearbyServiceAdvertiserDelegate {
             self.snapshot.connectionState = .connecting
             self.snapshot.connectedDeviceName = peerID.displayName
             self.snapshot.statusText = "Connecting..."
+            self.log("connection state=connecting peer=\(peerID.displayName)")
             self.publishSnapshot()
             invitationHandler(true, self.session)
         }
@@ -284,6 +340,7 @@ extension RemoteCameraTransport: MCNearbyServiceAdvertiserDelegate {
         queue.async {
             self.snapshot.connectionState = .failed
             self.snapshot.statusText = error.localizedDescription
+            self.log("error=\(error.localizedDescription)")
             self.publishSnapshot()
         }
     }

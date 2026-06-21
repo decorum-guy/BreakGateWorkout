@@ -41,11 +41,34 @@ enum RemoteCameraZoomLevel: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum RemoteCameraStreamQuality: String, Codable, CaseIterable, Identifiable {
+    case fhd1080p
+    case hd720p
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fhd1080p: return "FHD 1080p"
+        case .hd720p: return "HD 720p"
+        }
+    }
+
+    var dimensions: (width: Int, height: Int) {
+        switch self {
+        case .fhd1080p: return (1920, 1080)
+        case .hd720p: return (1280, 720)
+        }
+    }
+}
+
 struct RemoteCameraDeviceInfo: Codable, Equatable, Identifiable {
     let id: String
     let name: String
     let deviceName: String
     let supportsZoomLevels: [RemoteCameraZoomLevel]
+    let pairingToken: String?
+    let pairedCompanionID: String?
 }
 
 struct RemoteCameraFrameMetadata: Codable, Equatable {
@@ -55,6 +78,9 @@ struct RemoteCameraFrameMetadata: Codable, Equatable {
     let captureWidth: Int
     let captureHeight: Int
     let orientation: String
+    let remoteOrientation: String
+    let displayWidth: Int
+    let displayHeight: Int
     let isMirrored: Bool
     let zoomLabel: String
     let zoomFactor: Double
@@ -83,8 +109,11 @@ enum RemoteCameraMessage: Codable, Equatable {
 struct RemoteCameraSessionSnapshot: Equatable {
     var connectionState: RemoteCameraConnectionState = .disconnected
     var selectedMode: RemoteCameraMode = .localContinuity
+    var discoveredDeviceID: String?
     var discoveredDeviceName: String?
+    var connectedDeviceID: String?
     var connectedDeviceName: String?
+    var pairingToken: String?
     var latestMetadata: RemoteCameraFrameMetadata?
     var latestFrameData: Data?
     var latestFrameSize = CGSize(width: 16, height: 9)

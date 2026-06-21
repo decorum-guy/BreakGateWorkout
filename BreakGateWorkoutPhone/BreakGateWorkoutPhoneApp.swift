@@ -7,6 +7,9 @@ struct BreakGateWorkoutPhoneApp: App {
     var body: some Scene {
         WindowGroup {
             PhoneContentView(model: model)
+                .onOpenURL { url in
+                    model.handleOpenURL(url)
+                }
         }
     }
 }

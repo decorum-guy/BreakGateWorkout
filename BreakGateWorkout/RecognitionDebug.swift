@@ -352,16 +352,14 @@ private struct RecognitionDebugContributionView: View {
                 }
                 .buttonStyle(RecognitionDebugButtonStyle(kind: camera.cameraSourceMode == .iPhoneStreamBeta ? .primary : .secondary))
 
-                Button {
-                    if camera.cameraSourceMode == .iPhoneStreamBeta {
-                        camera.reconnectRemoteCamera()
-                    } else {
+                if camera.cameraSourceMode == .localContinuity {
+                    Button {
                         camera.refreshCameraDevices()
+                    } label: {
+                        Label(language == .russian ? "Обновить" : "Refresh", systemImage: "arrow.clockwise")
                     }
-                } label: {
-                    Label(language == .russian ? "Обновить / переподключить" : "Refresh / Reconnect", systemImage: "arrow.clockwise")
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
                 }
-                .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
             }
 
             if camera.cameraSourceMode == .localContinuity {
@@ -401,42 +399,27 @@ private struct RecognitionDebugContributionView: View {
                     .foregroundStyle(.secondary)
                 }
             } else {
-                Text(language == .russian
-                    ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac. Для beta-режима используется реальная камера iPhone без Continuity crop."
-                    : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac. This beta mode uses the real iPhone camera without Continuity crop."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    Button {
-                        if camera.remoteDiscoveredDeviceName != nil {
-                            camera.connectToDiscoveredIPhone()
-                        } else {
-                            camera.reconnectRemoteCamera()
-                        }
-                    } label: {
-                        Label(language == .russian ? "Подключить" : "Connect", systemImage: "link")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
-
-                    Button {
-                        camera.startRemoteStream()
-                    } label: {
-                        Label(language == .russian ? "Начать трансляцию" : "Start Stream", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
-
-                    Button {
-                        camera.stopRemoteStream()
-                    } label: {
-                        Label(language == .russian ? "Остановить трансляцию" : "Stop Stream", systemImage: "stop.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+                if let phoneName = camera.remoteSelectedPhoneName {
+                    Label(phoneName, systemImage: "iphone")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(language == .russian
+                        ? "Открой BreakGateWorkoutPhone на iPhone и подключись к этому Mac. Для beta-режима используется реальная камера iPhone без Continuity crop."
+                        : "Open BreakGateWorkoutPhone on your iPhone and connect to this Mac. This beta mode uses the real iPhone camera without Continuity crop."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
+
+                Button {
+                    camera.performRemotePrimaryAction()
+                } label: {
+                    Label(camera.remotePrimaryActionTitle, systemImage: camera.remotePrimaryActionIsDestructive ? "stop.fill" : "link")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(RecognitionDebugButtonStyle(kind: camera.remotePrimaryActionIsDestructive ? .secondary : .primary))
+                .disabled(!camera.remotePrimaryActionEnabled)
             }
 
             Label(

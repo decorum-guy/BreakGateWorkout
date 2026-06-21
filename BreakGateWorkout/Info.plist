@@ -15,6 +15,12 @@
 	<string>Camera is used to count exercises locally for BreakGate.</string>
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_breakgatecam._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Local network access is used only to find and connect your iPhone camera companion on nearby devices.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone is used for optional voice commands while the BreakGate workout gate is open.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
