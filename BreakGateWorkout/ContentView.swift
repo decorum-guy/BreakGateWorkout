@@ -118,21 +118,20 @@ private struct GateScreenLayout: View {
         GeometryReader { geometry in
             mainArea
             .padding(.horizontal, 36)
-            .padding(.top, gateTopInset(for: geometry.size.height))
-            .padding(.bottom, 32)
+            .padding(.vertical, gateVerticalInset(for: geometry.size.height))
         }
     }
 
     private var mainArea: some View {
-        HStack(alignment: .top, spacing: 22) {
+        HStack(alignment: .center, spacing: 22) {
             leftColumn
                 .frame(maxWidth: .infinity)
 
             CameraControlPanel(camera: camera)
                 .frame(width: 340)
-                .frame(maxHeight: .infinity)
+                .frame(maxHeight: .infinity, alignment: .center)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var leftColumn: some View {
@@ -144,7 +143,7 @@ private struct GateScreenLayout: View {
         }
     }
 
-    private func gateTopInset(for height: CGFloat) -> CGFloat {
+    private func gateVerticalInset(for height: CGFloat) -> CGFloat {
         max(CGFloat(34), min(CGFloat(56), height * CGFloat(0.062) - CGFloat(30)))
     }
 }
@@ -170,7 +169,7 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case .abs: "Abs"
         case .plank: "Plank"
         case .burpees: "Burpees"
-        case .mountainClimbers: "Mountain Climbers"
+        case .mountainClimbers: "Mountain Climbers (beta)"
         case .tuckPlancheHold: "Tuck Planche Hold"
         case .lSitHold: "L-sit Hold"
         case .elbowLeverHold: "Elbow Lever"
@@ -190,8 +189,8 @@ enum ExerciseMode: String, CaseIterable, Identifiable, Codable {
         case (.plank, .russian): "Планка"
         case (.burpees, .english): "Burpees"
         case (.burpees, .russian): "Бёрпи"
-        case (.mountainClimbers, .english): "Mountain Climbers"
-        case (.mountainClimbers, .russian): "Альпинист"
+        case (.mountainClimbers, .english): "Mountain Climbers (beta)"
+        case (.mountainClimbers, .russian): "Альпинист (бета)"
         case (.tuckPlancheHold, .english): "Tuck Planche Hold"
         case (.tuckPlancheHold, .russian): "Так планше"
         case (.lSitHold, .english): "L-sit Hold"
@@ -386,6 +385,10 @@ private struct CameraStageView: View {
                         CoachingOverlay(camera: camera)
                             .padding(16)
                     }
+                    .overlay(alignment: .bottomLeading) {
+                        CameraNotificationsPanel(camera: camera)
+                            .padding(16)
+                    }
                     .overlay(alignment: .bottomTrailing) {
                         PoseWaitCountdownOverlay(camera: camera)
                             .padding(16)
@@ -468,15 +471,6 @@ private struct CameraStageView: View {
             .frame(minHeight: 500)
             .animation(.easeInOut(duration: 0.22), value: camera.session != nil)
 
-            HStack(spacing: 8) {
-                Image(systemName: camera.selectedDeviceIsIPhone ? "iphone" : "web.camera.fill")
-                    .foregroundStyle(.secondary)
-                Text(camera.selectedCameraName)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 4)
         }
     }
 }
@@ -847,138 +841,141 @@ private struct CameraControlPanel: View {
     @ObservedObject var camera: CameraModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(camera.appLanguage == .russian ? "Камера" : "Camera")
-                        .font(.title3.weight(.semibold))
+        VStack {
+            Spacer(minLength: 0)
 
-                    HStack(spacing: 8) {
-                        CameraModePill(
-                            title: camera.appLanguage == .russian ? "Mac" : "Mac",
-                            systemImage: "display",
-                            isSelected: camera.session != nil && !camera.selectedDeviceIsIPhone,
-                            isEnabled: camera.hasMacCamera
-                        ) {
-                            camera.selectMacCamera()
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(camera.appLanguage == .russian ? "Камера" : "Camera")
+                            .font(.title3.weight(.semibold))
 
-                        CameraModePill(
-                            title: "iPhone",
-                            systemImage: "iphone",
-                            isSelected: camera.selectedDeviceIsIPhone,
-                            isEnabled: camera.hasIPhoneCamera
-                        ) {
-                            camera.selectIPhoneCamera()
-                        }
+                        HStack(spacing: 8) {
+                            CameraModePill(
+                                title: camera.appLanguage == .russian ? "Mac" : "Mac",
+                                systemImage: "display",
+                                isSelected: camera.session != nil && !camera.selectedDeviceIsIPhone,
+                                isEnabled: camera.hasMacCamera
+                            ) {
+                                camera.selectMacCamera()
+                            }
 
-                        Button {
-                            camera.refreshCameraDevices()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.callout.weight(.semibold))
-                                .frame(width: 36, height: 36)
-                                .background(Color.white.opacity(0.07), in: Circle())
-                                .overlay {
-                                    Circle()
-                                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-                                }
+                            CameraModePill(
+                                title: "iPhone",
+                                systemImage: "iphone",
+                                isSelected: camera.selectedDeviceIsIPhone,
+                                isEnabled: camera.hasIPhoneCamera
+                            ) {
+                                camera.selectIPhoneCamera()
+                            }
+
+                            Button {
+                                camera.refreshCameraDevices()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.callout.weight(.semibold))
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.white.opacity(0.07), in: Circle())
+                                    .overlay {
+                                        Circle()
+                                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .help(camera.appLanguage == .russian ? "Обновить камеры" : "Refresh cameras")
                         }
-                        .buttonStyle(.plain)
-                        .help(camera.appLanguage == .russian ? "Обновить камеры" : "Refresh cameras")
                     }
-                }
 
-                ZoomControlPanel(camera: camera)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(camera.appLanguage == .russian ? "Тренировка" : "Workout")
+                            .font(.headline.weight(.semibold))
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(camera.appLanguage == .russian ? "Тренировка" : "Workout")
-                        .font(.headline.weight(.semibold))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("\(L.t(.difficulty, camera.appLanguage)): \(camera.currentDifficultyTitle)")
-                        Text(camera.currentStepLabel)
-                        Text(camera.currentProgressSummary)
-                        Text(camera.currentRemainingSummary)
-                            .foregroundStyle(.secondary)
-                        if let nextStepPreview = camera.nextStepPreview {
-                            Text("\(camera.appLanguage == .russian ? "Дальше" : "Next"): \(nextStepPreview)")
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("\(L.t(.difficulty, camera.appLanguage)): \(camera.currentDifficultyTitle)")
+                            Text(camera.currentStepLabel)
+                            Text(camera.currentProgressSummary)
+                            Text(camera.currentRemainingSummary)
                                 .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.caption.weight(.medium))
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                    Picker(L.t(.difficulty, camera.appLanguage), selection: Binding(
-                        get: { camera.activeWorkoutPlan.difficulty },
-                        set: { camera.selectDifficulty($0) }
-                    )) {
-                        ForEach(WorkoutDifficulty.allCases) { difficulty in
-                            Text(difficulty.title(camera.appLanguage)).tag(difficulty)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .disabled(!camera.canChangeDifficulty)
-
-                    if !camera.canChangeDifficulty {
-                        Text(camera.appLanguage == .russian ? "Сложность блокируется после первого прогресса." : "Difficulty locks after first progress.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        exerciseGrid(modes: regularExerciseModes)
-
-                        if !experimentalExerciseModes.isEmpty {
-                            Text(camera.appLanguage == .russian ? "Экспериментальные упражнения" : "Experimental")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 4)
-
-                            exerciseGrid(modes: experimentalExerciseModes)
-                        }
-                    }
-                }
-
-                StatusStack(camera: camera)
-
-                Divider()
-                    .overlay(Color.white.opacity(0.10))
-
-                Toggle(camera.appLanguage == .russian ? "Debug-панель" : "Debug Panel", isOn: Binding(
-                    get: { camera.showDebugPanel },
-                    set: { camera.setDebugPanelVisible($0) }
-                ))
-                .toggleStyle(.switch)
-                .font(.footnote.weight(.medium))
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(camera.appLanguage == .russian ? "Устройства" : "Devices")
-                        .font(.headline.weight(.semibold))
-
-                    if camera.devices.isEmpty {
-                        EmptyDeviceCard(language: camera.appLanguage)
-                    } else {
-                        VStack(spacing: 10) {
-                            ForEach(camera.devices) { device in
-                                DeviceCard(
-                                    device: device,
-                                    isSelected: camera.selectedDeviceID == device.id,
-                                    language: camera.appLanguage
-                                ) {
-                                    camera.selectCamera(id: device.id)
-                                }
+                            if let nextStepPreview = camera.nextStepPreview {
+                                Text("\(camera.appLanguage == .russian ? "Дальше" : "Next"): \(nextStepPreview)")
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .font(.caption.weight(.medium))
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        Picker(L.t(.difficulty, camera.appLanguage), selection: Binding(
+                            get: { camera.activeWorkoutPlan.difficulty },
+                            set: { camera.selectDifficulty($0) }
+                        )) {
+                            ForEach(WorkoutDifficulty.allCases) { difficulty in
+                                Text(difficulty.title(camera.appLanguage)).tag(difficulty)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(!camera.canChangeDifficulty)
+
+                        if !camera.canChangeDifficulty {
+                            Text(camera.appLanguage == .russian ? "Сложность блокируется после первого прогресса." : "Difficulty locks after first progress.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            exerciseGrid(modes: regularExerciseModes)
+
+                            if !experimentalExerciseModes.isEmpty {
+                                Text(camera.appLanguage == .russian ? "Экспериментальные упражнения" : "Experimental")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 4)
+
+                                exerciseGrid(modes: experimentalExerciseModes)
+                            }
+                        }
+                    }
+
+                    Divider()
+                        .overlay(Color.white.opacity(0.10))
+
+                    Toggle(camera.appLanguage == .russian ? "Debug-панель" : "Debug Panel", isOn: Binding(
+                        get: { camera.showDebugPanel },
+                        set: { camera.setDebugPanelVisible($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .font(.footnote.weight(.medium))
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(camera.appLanguage == .russian ? "Устройства" : "Devices")
+                            .font(.headline.weight(.semibold))
+
+                        if camera.devices.isEmpty {
+                            EmptyDeviceCard(language: camera.appLanguage)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(camera.devices) { device in
+                                    DeviceCard(
+                                        device: device,
+                                        isSelected: camera.selectedDeviceID == device.id,
+                                        language: camera.appLanguage
+                                    ) {
+                                        camera.selectCamera(id: device.id)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
                     }
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
             }
-            .padding(18)
+            .scrollIndicators(.hidden)
+
+            Spacer(minLength: 0)
         }
-        .scrollIndicators(.hidden)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -1010,76 +1007,6 @@ private struct CameraControlPanel: View {
     }
 }
 
-private struct ZoomControlPanel: View {
-    @ObservedObject var camera: CameraModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(camera.appLanguage == .russian ? "Линза / Зум" : "Lens / Zoom")
-                    .font(.headline.weight(.semibold))
-                Spacer()
-                Text("\(camera.zoomFactor, specifier: "%.2f")x")
-                    .font(.footnote.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 8) {
-                ZoomPresetButton(title: "0.5x", isEnabled: camera.supportsUltraWideZoom) {
-                    camera.setZoomFactor(0.5)
-                }
-                ZoomPresetButton(title: "1x", isEnabled: camera.supportsWideZoom) {
-                    camera.setZoomFactor(1)
-                }
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-
-            Text("\(camera.appLanguage == .russian ? "Активно" : "Active"): \(camera.selectedInputSourceName)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if camera.selectedDeviceIsIPhone && !camera.supportsUltraWideZoom {
-                Text(camera.appLanguage == .russian ? "0.5x не доступен через это Continuity Camera устройство." : "0.5x is not exposed by this Continuity Camera device.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if camera.inputSources.isEmpty {
-                Text(camera.appLanguage == .russian ? "macOS не отдает управление зумом для этой камеры." : "macOS does not expose digital zoom for this camera.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(12)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct ZoomPresetButton: View {
-    let title: String
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(Color.white.opacity(isEnabled ? 0.08 : 0.035), in: Capsule())
-                .overlay {
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(isEnabled ? 0.12 : 0.05), lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .opacity(isEnabled ? 1 : 0.45)
-        .disabled(!isEnabled)
-    }
-}
-
 private struct ExerciseModeButton: View {
     let mode: ExerciseMode
     let isSelected: Bool
@@ -1099,6 +1026,141 @@ private struct ExerciseModeButton: View {
                 }
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct CameraNotificationsPanel: View {
+    @ObservedObject var camera: CameraModel
+    @State private var isExpanded = false
+    @State private var expandedContentHeight: CGFloat = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                    Text(camera.appLanguage == .russian ? "Уведомления" : "Notifications")
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .foregroundStyle(.white.opacity(0.92))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 1)
+                .padding(.horizontal, 12)
+                .frame(height: isExpanded ? 1 : 0, alignment: .top)
+                .clipped()
+                .opacity(isExpanded ? 1 : 0)
+
+            VStack(spacing: 8) {
+                notificationRow(
+                    title: primaryStatusTitle,
+                    systemImage: primaryStatusIcon,
+                    color: primaryStatusColor
+                )
+
+                notificationRow(
+                    title: camera.selectedCameraStatusTitle,
+                    systemImage: camera.selectedDeviceIsIPhone ? "iphone.circle.fill" : "web.camera.fill",
+                    color: camera.selectedDeviceIsIPhone ? .blue : .secondary
+                )
+
+                notificationRow(
+                    title: camera.continuityAvailabilityTitle,
+                    systemImage: camera.hasIPhoneCamera ? "iphone.circle.fill" : "iphone.slash",
+                    color: camera.hasIPhoneCamera ? .blue : .secondary
+                )
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+            .padding(.top, isExpanded ? 10 : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: CameraNotificationsContentHeightKey.self, value: proxy.size.height)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(height: isExpanded ? expandedContentHeight : 0, alignment: .top)
+            .clipped()
+            .opacity(isExpanded ? 1 : 0)
+            .offset(y: isExpanded ? 0 : -4)
+            .allowsHitTesting(isExpanded)
+        }
+        .frame(maxWidth: 320, alignment: .leading)
+        .padding(4)
+        .background(Color.black.opacity(0.40), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onPreferenceChange(CameraNotificationsContentHeightKey.self) { height in
+            expandedContentHeight = height
+        }
+        .animation(.spring(response: 0.42, dampingFraction: 0.90, blendDuration: 0.16), value: isExpanded)
+    }
+
+    private var primaryStatusTitle: String {
+        if camera.statusIsError {
+            return camera.appLanguage == .russian ? "Камера недоступна" : "Camera unavailable"
+        }
+        if camera.isSwitchingCamera {
+            return camera.appLanguage == .russian ? "Подключение камеры…" : "Connecting camera…"
+        }
+        if camera.session != nil {
+            return camera.appLanguage == .russian ? "Камера готова" : "Camera ready"
+        }
+        return camera.appLanguage == .russian ? "Подключение камеры…" : "Connecting camera…"
+    }
+
+    private var primaryStatusIcon: String {
+        if camera.statusIsError { return "xmark.circle.fill" }
+        if camera.isSwitchingCamera { return "arrow.triangle.2.circlepath" }
+        if camera.session != nil { return "checkmark.circle.fill" }
+        return "circle.dotted"
+    }
+
+    private var primaryStatusColor: Color {
+        if camera.statusIsError { return .red }
+        if camera.isSwitchingCamera { return .yellow }
+        if camera.session != nil { return .green }
+        return .secondary
+    }
+
+    private func notificationRow(title: String, systemImage: String, color: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+                .frame(width: 18)
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.86))
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct CameraNotificationsContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -1452,6 +1514,27 @@ final class SoundFeedbackService {
         fadeOutMainMenu()
     }
 
+    func stopAllImmediatelyForShutdown() {
+        DiagnosticLog.log("shutdown audio stop requested")
+        gatePlaybackGeneration += 1
+        gateMusicTask?.cancel()
+        gateMusicTask = nil
+        fadeTask?.cancel()
+        fadeTask = nil
+
+        gateStartPlayer?.stop()
+        gateStartPlayer = nil
+
+        mainMenuPlayer?.stop()
+        mainMenuPlayer = nil
+
+        effectPlayers.forEach { $0.stop() }
+        effectPlayers.removeAll()
+
+        gateMusicState = .stopped
+        DiagnosticLog.log("audio stopped")
+    }
+
     private func startMainMenuLoop() {
         guard gateMusicState == .starting else { return }
         guard mainMenuPlayer == nil else { return }
@@ -1552,6 +1635,8 @@ final class SoundFeedbackService {
 
 @MainActor
 final class CameraModel: ObservableObject {
+    @MainActor private static var activeInstances: [WeakCameraModelRef] = []
+
     static let isEmergencyUnlockEnabled = true
     private enum PreferredCameraKind: String {
         case mac
@@ -1838,6 +1923,7 @@ final class CameraModel: ObservableObject {
     }
 
     init() {
+        CameraModel.register(self)
         poseDetectionService.onUpdate = { [weak self] update in
             self?.applyPoseUpdate(update)
         }
@@ -1897,6 +1983,43 @@ final class CameraModel: ObservableObject {
         hasReceivedCameraFrame = false
         resetPoseState()
     }
+
+    func stopForAppTermination() {
+        DiagnosticLog.log("shutdown camera stop requested")
+        recognitionDebugSessionActive = false
+        onRecognitionDebugPoseUpdate = nil
+        onRecognitionDebugStepCompleted = nil
+        onRecognitionDebugVideoSampleBuffer = nil
+        voiceCommandService.stopForAppTermination()
+        sessionController.stopSynchronously()
+        poseDetectionService.reset()
+        soundFeedback.stopAllImmediatelyForShutdown()
+        session = nil
+        isSwitchingCamera = false
+        hasReceivedCameraFrame = false
+        resetPoseState()
+        DiagnosticLog.log("camera stopped")
+    }
+
+    @MainActor
+    static func shutdownAllForAppTermination() {
+        let liveModels = activeInstances.compactMap(\.model)
+        guard !liveModels.isEmpty else {
+            DiagnosticLog.log("camera stopped")
+            return
+        }
+
+        for model in liveModels {
+            model.stopForAppTermination()
+        }
+    }
+
+    @MainActor
+    private static func register(_ model: CameraModel) {
+        activeInstances.removeAll { $0.model == nil }
+        activeInstances.append(WeakCameraModelRef(model))
+    }
+
 
     func setAppLanguage(_ language: AppLanguage) {
         appLanguage = language
@@ -2638,12 +2761,25 @@ final class CameraModel: ObservableObject {
             }
         } else if selectedMode == .mountainClimbers {
             switch currentPoseState {
-            case MountainClimberPhase.plankReady.rawValue:
+            case MountainClimberPhase.phaseWaitingForStablePlank.rawValue:
+                coachingMessage = appLanguage == .russian
+                    ? "Альпинист (бета). Поставь камеру чуть сбоку: 30–45°, чтобы были видны плечи, таз, колени и стопы"
+                    : "Mountain Climbers (beta). Place the camera at a 30–45° side angle so shoulders, hips, knees, and feet are visible"
+            case MountainClimberPhase.phaseArmed.rawValue, MountainClimberPhase.plankReady.rawValue:
                 coachingMessage = appLanguage == .russian ? "Подтяни колено" : "Drive your knee"
-            case MountainClimberPhase.leftKneeDrive.rawValue, MountainClimberPhase.rightKneeDrive.rawValue:
-                coachingMessage = appLanguage == .russian ? "Смени ногу" : "Switch legs"
-            case MountainClimberPhase.waitingForAlternation.rawValue:
+            case MountainClimberPhase.phaseKneeDriveSeen.rawValue:
+                coachingMessage = appLanguage == .russian ? "Вернись в планку" : "Return to plank"
+            case MountainClimberPhase.rejectionNoStablePlank.rawValue,
+                 MountainClimberPhase.rejectionUnstableTransition.rawValue,
+                 MountainClimberPhase.rejectionBodyNotPlankLike.rawValue:
                 coachingMessage = appLanguage == .russian ? "Держи планку" : "Hold plank"
+            case MountainClimberPhase.rejectionInsufficientPlankAnchors.rawValue,
+                 MountainClimberPhase.rejectionMissingKeypoints.rawValue:
+                coachingMessage = appLanguage == .russian ? "Плохо видно плечи/таз. Поставь камеру чуть сбоку" : "Shoulders/hips are not visible enough. Move camera slightly to the side"
+            case MountainClimberPhase.rejectionNoUsableLegChain.rawValue:
+                coachingMessage = appLanguage == .russian ? "Плохо видно колени. Нужны колени и стопы в кадре" : "Knees are not visible enough. Keep knees and feet visible"
+            case WorkoutState.noPerson.rawValue:
+                coachingMessage = appLanguage == .russian ? "Плохо видно тело" : "Body visibility is weak"
             default:
                 coachingMessage = appLanguage == .russian ? "Держи корпус" : "Keep your core tight"
             }
@@ -2672,14 +2808,16 @@ final class CameraModel: ObservableObject {
                 coachingMessage = appLanguage == .russian ? "Встань в локтевой рычаг" : "Get into elbow lever"
             }
         } else if selectedMode == .pikePushUps {
-            if currentPoseState == PikePushUpPhase.pikeUp.rawValue {
+            if currentPoseState.contains("pikeUp") {
                 coachingMessage = appLanguage == .russian ? "Держи таз выше" : "Keep your hips high"
-            } else if currentPoseState == PikePushUpPhase.pikeDown.rawValue {
+            } else if currentPoseState.contains("pikeDown") {
                 coachingMessage = appLanguage == .russian ? "Опусти голову к полу" : "Lower your head toward the floor"
             } else if currentPoseState.contains("hips") {
                 coachingMessage = appLanguage == .russian ? "Не опускай таз" : "Do not drop your hips"
             } else if currentPoseState.contains("legs") {
                 coachingMessage = appLanguage == .russian ? "Выпрями ноги" : "Straighten your legs"
+            } else if currentPoseState.contains("support") || currentPoseState.contains("upper body") {
+                coachingMessage = appLanguage == .russian ? "Поставь камеру чуть сбоку и покажи руки" : "Move the camera slightly to the side and keep your arms visible"
             } else {
                 coachingMessage = appLanguage == .russian ? "Встань в пайк" : "Get into pike"
             }
@@ -2836,27 +2974,16 @@ final class CameraModel: ObservableObject {
 
     private func checkWorkoutCompletion() {
         guard !workoutCompletionRecorded else { return }
+        guard !recognitionDebugSessionActive else { return }
 
         switch selectedMode {
         case .pushUps, .squats, .abs, .burpees, .mountainClimbers, .pikePushUps:
             guard repCount >= targetRepCount else { return }
-            if recognitionDebugSessionActive {
-                workoutCompletionRecorded = true
-                DiagnosticLog.log("recognition debug rep target reached mode=\(selectedMode.rawValue)")
-                onRecognitionDebugStepCompleted?()
-                return
-            }
             completeCurrentStep(amount: repCount)
         case .plank, .tuckPlancheHold, .lSitHold, .elbowLeverHold:
             guard plankTimeRemaining <= 0, plankIsActive else { return }
             if selectedMode == .lSitHold || selectedMode == .elbowLeverHold {
                 DiagnosticLog.log("\(selectedMode.rawValue) hold completed")
-            }
-            if recognitionDebugSessionActive {
-                workoutCompletionRecorded = true
-                DiagnosticLog.log("recognition debug timed target reached mode=\(selectedMode.rawValue)")
-                onRecognitionDebugStepCompleted?()
-                return
             }
             completeCurrentStep(amount: Int(plankDuration.rounded()))
         }
@@ -3015,6 +3142,13 @@ private final class CameraSessionController: @unchecked Sendable {
         }
     }
 
+    func stopSynchronously() {
+        DiagnosticLog.log("CameraSessionController.stop synchronously requested")
+        queue.sync {
+            self.stopCurrentSession()
+        }
+    }
+
     private func stopCurrentSession() {
         guard let session = currentSession else {
             DiagnosticLog.log("CameraSessionController.stopCurrentSession no active session")
@@ -3072,6 +3206,7 @@ struct PoseDetectionUpdate {
     let isStartingPoseDetected: Bool
     let posePoints: [PoseJointPoint]
     let videoSize: CGSize
+    let pikeAttemptMetrics: PikeAttemptDebugMetrics?
 }
 
 private enum ExerciseStartReason {
@@ -3082,6 +3217,20 @@ private enum ExerciseStartReason {
 private struct PoseStateResult {
     let state: WorkoutState
     let debugState: String
+    let sampleTimestamp: CFTimeInterval?
+}
+
+struct PikeAttemptDebugMetrics {
+    let phase: String
+    let bestSide: String?
+    let topElbowAngle: Double?
+    let bottomElbowAngle: Double?
+    let currentElbowAngle: Double?
+    let elbowAngleDelta: Double?
+    let lastDownSeenTime: Double?
+    let lastTopSeenTime: Double?
+    let returnToTopDetected: Bool
+    let countBlockedReason: String?
 }
 
 private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
@@ -3110,14 +3259,19 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private let burpeeSquatThreshold: CGFloat = 125
     private let mountainClimberHipDriveThreshold: CGFloat = 138
     private let mountainClimberKneeToShoulderRatio: CGFloat = 0.74
+    private let mountainClimberRepCooldown: CFTimeInterval = 0.40
+    private let mountainClimberStablePlankFramesRequired = 3
     private let tuckPlancheArmStraightThreshold: CGFloat = 150
     private let tuckPlancheKneeToTorsoRatio: CGFloat = 1.35
     private let lSitArmStraightThreshold: CGFloat = 145
     private let lSitLegStraightThreshold: CGFloat = 145
     private let elbowLeverBodyStraightThreshold: CGFloat = 145
-    private let pikeExtendedThreshold: CGFloat = 145
-    private let pikeDownElbowMin: CGFloat = 55
+    private let pikeExtendedThreshold: CGFloat = 140
+    private let pikeDownElbowMin: CGFloat = 70
     private let pikeDownElbowMax: CGFloat = 120
+    private let pikeElbowDeltaThreshold: CGFloat = 25
+    private let pikeRepCooldown: CFTimeInterval = 0.35
+    private let pikeTransientLossTolerance: CFTimeInterval = 0.8
 
     private var mode: ExerciseMode = .pushUps
     private var lastProcessedTime: CFTimeInterval = 0
@@ -3131,13 +3285,32 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     private var burpeeLastHipY: CGFloat?
     private var mountainPhase: MountainClimberPhase = .plankReady
     private var lastMountainDriveSide: BodySide?
-    private var pikePhase: PikePushUpPhase = .pikeReady
+    private var mountainStablePlankFrames = 0
+    private var mountainLastCountedAt: CFTimeInterval = 0
+    private var mountainCyclePhase: MountainClimberCyclePhase = .waitingForStablePlank
+    private var mountainPendingDriveSide: BodySide?
+    private var pikePhase: PikePushUpPhase = .pikeReadyOneSide
     private var pikeTopHeadY: CGFloat?
     private var pikeTopShoulderY: CGFloat?
     private var pikeTopElbowAngle: CGFloat?
     private var pikeBottomHeadY: CGFloat?
     private var pikeBottomShoulderY: CGFloat?
     private var pikeBottomElbowAngle: CGFloat?
+    private var pikeLastCountedAt: CFTimeInterval = 0
+    private var pikeTopBestSide: BodySide?
+    private var pikeBottomBestSide: BodySide?
+    private var pikeAttemptState: PikeAttemptState = .waitingForPikeUp
+    private var pikeAttemptTopTime: CFTimeInterval?
+    private var pikeAttemptDownTime: CFTimeInterval?
+    private var pikeLastUsablePikeTime: CFTimeInterval?
+    private var pikeMinElbowAngleDuringAttempt: CGFloat?
+    private var pikeAttemptTopElbowAngle: CGFloat?
+    private var pikeAttemptBottomElbowAngle: CGFloat?
+    private var pikeAttemptBestSide: BodySide?
+    private var pikeTransientLostStartedAt: CFTimeInterval?
+    private var pikeCurrentElbowAngle: CGFloat?
+    private var pikeReturnToTopDetected = false
+    private var pikeCountBlockedReason: String?
     private var countingEnabled = false
     private var diagnosticsWindowStart = CACurrentMediaTime()
     private var diagnosticsFramesSeen = 0
@@ -3166,7 +3339,8 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
                         isPersonDetected: false,
                         isStartingPoseDetected: false,
                         posePoints: [],
-                        videoSize: CGSize(width: 16, height: 9)
+                        videoSize: CGSize(width: 16, height: 9),
+                        pikeAttemptMetrics: nil
                     )
                 )
             }
@@ -3201,13 +3375,21 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         burpeeLastHipY = nil
         mountainPhase = .plankReady
         lastMountainDriveSide = nil
-        pikePhase = .pikeReady
+        mountainStablePlankFrames = 0
+        mountainLastCountedAt = 0
+        mountainCyclePhase = .waitingForStablePlank
+        mountainPendingDriveSide = nil
+        pikePhase = .pikeReadyOneSide
         pikeTopHeadY = nil
         pikeTopShoulderY = nil
         pikeTopElbowAngle = nil
         pikeBottomHeadY = nil
         pikeBottomShoulderY = nil
         pikeBottomElbowAngle = nil
+        pikeLastCountedAt = 0
+        pikeTopBestSide = nil
+        pikeBottomBestSide = nil
+        resetPikeAttempt()
     }
 
     func captureOutput(
@@ -3259,7 +3441,7 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             }
 
             let startingPoseDetected = isStartingPoseValid(points: points)
-            let poseResult = countingEnabled ? updateExerciseState(points: points) : startingPoseResult(isDetected: startingPoseDetected)
+            let poseResult = countingEnabled ? updateExerciseState(points: points, sampleTimestamp: now) : startingPoseResult(isDetected: startingPoseDetected)
             publish(
                 workoutState: poseResult.state,
                 debugState: poseResult.debugState,
@@ -3317,10 +3499,10 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
 
     private func startingPoseResult(isDetected: Bool) -> PoseStateResult {
         if mode == .plank {
-            return PoseStateResult(state: isDetected ? .plankActive : .tracking, debugState: isDetected ? "plank ready" : "waiting start")
+            return PoseStateResult(state: isDetected ? .plankActive : .tracking, debugState: isDetected ? "plank ready" : "waiting start", sampleTimestamp: nil)
         }
 
-        return PoseStateResult(state: isDetected ? .tracking : .idle, debugState: isDetected ? "start ready" : "waiting start")
+        return PoseStateResult(state: isDetected ? .tracking : .idle, debugState: isDetected ? "start ready" : "waiting start", sampleTimestamp: nil)
     }
 
     private func isStartingPoseValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
@@ -3356,7 +3538,7 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         }
     }
 
-    private func updateExerciseState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> PoseStateResult {
+    private func updateExerciseState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], sampleTimestamp: CFTimeInterval) -> PoseStateResult {
         switch mode {
         case .pushUps:
             guard let elbowAngle = bestAngle(
@@ -3364,50 +3546,53 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
                 firstCandidates: [.leftShoulder, .rightShoulder],
                 middleCandidates: [.leftElbow, .rightElbow],
                 lastCandidates: [.leftWrist, .rightWrist]
-            ) else { return PoseStateResult(state: .tracking, debugState: "push-up tracking") }
+            ) else { return PoseStateResult(state: .tracking, debugState: "push-up tracking", sampleTimestamp: sampleTimestamp) }
 
-            return PoseStateResult(state: updatePushUpState(elbowAngle: elbowAngle) ? .activeExercise : .tracking, debugState: pushUpPosition == .down ? "push-up down" : "push-up up")
+            return PoseStateResult(state: updatePushUpState(elbowAngle: elbowAngle) ? .activeExercise : .tracking, debugState: pushUpPosition == .down ? "push-up down" : "push-up up", sampleTimestamp: sampleTimestamp)
         case .squats:
             guard let kneeAngle = bestAngle(
                 points: points,
                 firstCandidates: [.leftHip, .rightHip],
                 middleCandidates: [.leftKnee, .rightKnee],
                 lastCandidates: [.leftAnkle, .rightAnkle]
-            ) else { return PoseStateResult(state: .tracking, debugState: "squat tracking") }
+            ) else { return PoseStateResult(state: .tracking, debugState: "squat tracking", sampleTimestamp: sampleTimestamp) }
 
-            return PoseStateResult(state: updateSquatState(kneeAngle: kneeAngle) ? .activeExercise : .tracking, debugState: squatPosition == .down ? "squat down" : "squat up")
+            return PoseStateResult(state: updateSquatState(kneeAngle: kneeAngle) ? .activeExercise : .tracking, debugState: squatPosition == .down ? "squat down" : "squat up", sampleTimestamp: sampleTimestamp)
         case .abs:
             guard let metrics = absMetrics(points: points) else {
-                return PoseStateResult(state: .tracking, debugState: "abs tracking")
+                return PoseStateResult(state: .tracking, debugState: "abs tracking", sampleTimestamp: sampleTimestamp)
             }
 
             let counted = updateAbsState(metrics: metrics)
             let phase = absPosition == .down ? "abs contracted" : "abs extended"
             return PoseStateResult(
                 state: counted ? .activeExercise : .tracking,
-                debugState: "\(phase) angle \(Int(metrics.torsoAngle.rounded())) ratio \(String(format: "%.2f", metrics.shoulderToKneeRatio))"
+                debugState: "\(phase) angle \(Int(metrics.torsoAngle.rounded())) ratio \(String(format: "%.2f", metrics.shoulderToKneeRatio))",
+                sampleTimestamp: sampleTimestamp
             )
         case .plank:
             let isValid = isPlankFormValid(points: points)
-            return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "plank active" : "plank broken")
+            return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "plank active" : "plank broken", sampleTimestamp: sampleTimestamp)
         case .tuckPlancheHold:
             let isValid = isTuckPlancheValid(points: points)
-            return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "tuck planche hold" : "tuck planche setup")
+            return PoseStateResult(state: isValid ? .plankActive : .plankBroken, debugState: isValid ? "tuck planche hold" : "tuck planche setup", sampleTimestamp: sampleTimestamp)
         case .lSitHold:
             let result = lSitPoseResult(points: points)
-            return PoseStateResult(state: result.isValid ? .plankActive : .plankBroken, debugState: result.debugState)
+            return PoseStateResult(state: result.isValid ? .plankActive : .plankBroken, debugState: result.debugState, sampleTimestamp: sampleTimestamp)
         case .elbowLeverHold:
             let result = elbowLeverPoseResult(points: points)
-            return PoseStateResult(state: result.isValid ? .plankActive : .plankBroken, debugState: result.debugState)
+            return PoseStateResult(state: result.isValid ? .plankActive : .plankBroken, debugState: result.debugState, sampleTimestamp: sampleTimestamp)
         case .burpees:
             let counted = updateBurpeeState(points: points)
-            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: burpeePhase.rawValue)
+            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: burpeePhase.rawValue, sampleTimestamp: sampleTimestamp)
         case .mountainClimbers:
-            let counted = updateMountainClimberState(points: points)
-            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: mountainPhase.rawValue)
+            let counted = updateMountainClimberState(points: points, sampleTimestamp: sampleTimestamp)
+            let debugState = counted ? MountainClimberPhase.countedReturnedCycle.rawValue : mountainPhase.rawValue
+            assertMountainClimberCountingStateIfNeeded(debugState: debugState, counted: counted)
+            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: debugState, sampleTimestamp: sampleTimestamp)
         case .pikePushUps:
-            let counted = updatePikePushUpState(points: points)
-            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: pikePhase.rawValue)
+            let counted = updatePikePushUpState(points: points, sampleTimestamp: sampleTimestamp)
+            return PoseStateResult(state: counted ? .activeExercise : .tracking, debugState: pikePhase.rawValue, sampleTimestamp: sampleTimestamp)
         }
     }
 
@@ -3591,39 +3776,103 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         return false
     }
 
-    private func updateMountainClimberState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
-        guard isMountainClimberBaseValid(points: points) else {
-            mountainPhase = .waitingForAlternation
+    private func updateMountainClimberState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], sampleTimestamp: CFTimeInterval) -> Bool {
+        let anchors = mountainClimberAnchors(points: points)
+        guard anchors.hasSufficientPlankAnchors else {
+            resetMountainClimberCycle()
+            mountainPhase = .rejectionInsufficientPlankAnchors
             return false
         }
 
-        let leftDrive = kneeDriveSide(points: points, side: .left)
-        let rightDrive = kneeDriveSide(points: points, side: .right)
-        let driveSide: BodySide?
-        if leftDrive && !rightDrive {
-            driveSide = .left
-        } else if rightDrive && !leftDrive {
-            driveSide = .right
-        } else {
-            driveSide = nil
-        }
-
-        guard let driveSide else {
-            mountainPhase = .plankReady
+        guard anchors.hasUsableLegChain else {
+            resetMountainClimberCycle()
+            mountainPhase = .rejectionNoUsableLegChain
             return false
         }
 
-        mountainPhase = driveSide == .left ? .leftKneeDrive : .rightKneeDrive
+        let baseValidity = mountainClimberBaseValidity(points: points)
+        guard baseValidity.isStablePlank else {
+            resetMountainClimberCycle()
+            mountainPhase = .rejectionUnstableTransition
+            return false
+        }
 
-        if let lastMountainDriveSide, lastMountainDriveSide != driveSide {
+        mountainStablePlankFrames += 1
+        let hasStablePlank = mountainStablePlankFrames >= mountainClimberStablePlankFramesRequired
+        let driveSide = detectedMountainDriveSide(points: points, anchors: anchors)
+
+        switch mountainCyclePhase {
+        case .waitingForStablePlank:
+            guard hasStablePlank else {
+                mountainPhase = .phaseWaitingForStablePlank
+                return false
+            }
+            mountainCyclePhase = .armedInPlank
+            mountainPhase = .phaseArmed
+            return false
+        case .armedInPlank:
+            guard let driveSide else {
+                mountainPhase = .phaseArmed
+                return false
+            }
+            if sampleTimestamp - mountainLastCountedAt < mountainClimberRepCooldown {
+                mountainPhase = .rejectionCooldown
+                return false
+            }
+            if mountainCanUseSideAlternation(anchors: anchors),
+               let lastMountainDriveSide,
+               lastMountainDriveSide == driveSide {
+                mountainPendingDriveSide = driveSide
+                mountainCyclePhase = .kneeDriveSeen
+                mountainPhase = .rejectionSameSideRepeat
+                return false
+            }
+            mountainPendingDriveSide = driveSide
+            mountainCyclePhase = .kneeDriveSeen
+            mountainPhase = .phaseKneeDriveSeen
+            return false
+        case .kneeDriveSeen:
+            guard driveSide == nil else {
+                mountainPhase = .phaseKneeDriveSeen
+                return false
+            }
+            guard hasStablePlank else {
+                mountainPhase = .rejectionNoStablePlank
+                return false
+            }
+            if sampleTimestamp - mountainLastCountedAt < mountainClimberRepCooldown {
+                mountainPhase = .rejectionCooldown
+                return false
+            }
+            if let mountainPendingDriveSide {
+                lastMountainDriveSide = mountainPendingDriveSide
+            }
+            mountainLastCountedAt = sampleTimestamp
+            mountainPendingDriveSide = nil
+            mountainCyclePhase = .countedWaitingForReturn
+            mountainPhase = .countedReturnedCycle
             repCount += 1
-            self.lastMountainDriveSide = driveSide
             print("BreakGateWorkout pose: rep counted (\(repCount))")
             return true
+        case .countedWaitingForReturn:
+            guard hasStablePlank else {
+                mountainPhase = .rejectionNoStablePlank
+                return false
+            }
+            guard driveSide == nil else {
+                mountainPhase = .rejectionCooldown
+                return false
+            }
+            mountainCyclePhase = .armedInPlank
+            mountainPhase = .phaseArmed
+            return false
         }
+    }
 
-        lastMountainDriveSide = driveSide
-        return false
+    private func resetMountainClimberCycle() {
+        mountainStablePlankFrames = 0
+        mountainCyclePhase = .waitingForStablePlank
+        mountainPendingDriveSide = nil
     }
 
     private func kneeDriveSide(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], side: BodySide) -> Bool {
@@ -3658,9 +3907,76 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
     }
 
     private func isMountainClimberBaseValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+        mountainClimberBaseValidity(points: points).isStablePlank
+    }
+
+    private func mountainClimberBaseValidity(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isStablePlank: Bool, strongestAngle: CGFloat?) {
         let leftLine = sideBodyLineAngle(points: points, side: .left)
         let rightLine = sideBodyLineAngle(points: points, side: .right)
-        return [leftLine, rightLine].compactMap { $0 }.contains { $0 >= mountainClimberPlankThreshold }
+        let strongestAngle = [leftLine, rightLine].compactMap { $0 }.max()
+        return ((strongestAngle ?? 0) >= mountainClimberPlankThreshold, strongestAngle)
+    }
+
+    private func mountainClimberVisibleKeypointCount(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Int {
+        let required: [VNHumanBodyPoseObservation.JointName] = [
+            .leftShoulder, .rightShoulder,
+            .leftWrist, .rightWrist,
+            .leftHip, .rightHip,
+            .leftKnee, .rightKnee,
+            .leftAnkle, .rightAnkle
+        ]
+        return required.reduce(into: 0) { count, joint in
+            if validPoint(points[joint]) != nil {
+                count += 1
+            }
+        }
+    }
+
+    private func mountainClimberAnchors(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (hasSufficientPlankAnchors: Bool, hasUsableLegChain: Bool, leftLegChain: Bool, rightLegChain: Bool) {
+        let shoulderCount = [points[.leftShoulder], points[.rightShoulder]].compactMap(validPoint).count
+        let wristCount = [points[.leftWrist], points[.rightWrist]].compactMap(validPoint).count
+        let hipCount = [points[.leftHip], points[.rightHip]].compactMap(validPoint).count
+        let hasSufficientPlankAnchors = shoulderCount >= 1 && wristCount >= 1 && hipCount >= 1 && (shoulderCount + wristCount + hipCount) >= 4
+
+        let leftLegChain = validPoint(points[.leftHip]) != nil && validPoint(points[.leftKnee]) != nil && validPoint(points[.leftAnkle]) != nil
+        let rightLegChain = validPoint(points[.rightHip]) != nil && validPoint(points[.rightKnee]) != nil && validPoint(points[.rightAnkle]) != nil
+        let hasUsableLegChain = leftLegChain || rightLegChain
+        return (hasSufficientPlankAnchors, hasUsableLegChain, leftLegChain, rightLegChain)
+    }
+
+    private func detectedMountainDriveSide(
+        points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint],
+        anchors: (hasSufficientPlankAnchors: Bool, hasUsableLegChain: Bool, leftLegChain: Bool, rightLegChain: Bool)
+    ) -> BodySide? {
+        let leftDrive = anchors.leftLegChain && kneeDriveSide(points: points, side: .left)
+        let rightDrive = anchors.rightLegChain && kneeDriveSide(points: points, side: .right)
+        if leftDrive && !rightDrive {
+            return .left
+        }
+        if rightDrive && !leftDrive {
+            return .right
+        }
+        if leftDrive || rightDrive {
+            return leftDrive ? .left : .right
+        }
+        return nil
+    }
+
+    private func mountainCanUseSideAlternation(
+        anchors: (hasSufficientPlankAnchors: Bool, hasUsableLegChain: Bool, leftLegChain: Bool, rightLegChain: Bool)
+    ) -> Bool {
+        anchors.leftLegChain && anchors.rightLegChain
+    }
+
+    private func assertMountainClimberCountingStateIfNeeded(debugState: String, counted: Bool) {
+        guard counted else { return }
+        if debugState.hasPrefix("mountainClimbers rejected:")
+            || debugState == WorkoutState.noPerson.rawValue
+            || debugState == MountainClimberPhase.plankReady.rawValue
+            || debugState == MountainClimberPhase.phaseWaitingForStablePlank.rawValue
+            || debugState == MountainClimberPhase.phaseArmed.rawValue {
+            DiagnosticLog.log("mountainClimbers assertion: rep increment attempted in invalid debugState=\(debugState)")
+        }
     }
 
     private func isBurpeePlankValid(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
@@ -3740,180 +4056,476 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
         return kneePoints.contains { distance($0, shoulderCenter) / torsoReference <= tuckPlancheKneeToTorsoRatio }
     }
 
-    private func updatePikePushUpState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> Bool {
+    private func updatePikePushUpState(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], sampleTimestamp: CFTimeInterval) -> Bool {
+        pikeReturnToTopDetected = false
+        pikeCountBlockedReason = nil
+        pikeCurrentElbowAngle = nil
+        let transientLostStartedAt = pikeTransientLostStartedAt
         let top = pikeTopPoseResult(points: points)
         let bottom = pikeBottomPoseResult(points: points)
+        let relaxedTop = pikeTopPoseResult(points: points, allowBentArms: true)
+        let hasUsablePike = top.isValid || bottom.isValid || relaxedTop.isValid
+
+        if hasUsablePike {
+            pikeLastUsablePikeTime = sampleTimestamp
+            pikeTransientLostStartedAt = nil
+        }
 
         if top.isValid {
             let metrics = top.metrics
+            updatePikeAttemptMetrics(with: metrics)
+            pikeCurrentElbowAngle = metrics?.elbowAngle
+            if pikeAttemptState == .downSeen || pikeAttemptState == .waitingForReturn {
+                pikeReturnToTopDetected = true
+                return resolvePikeReturnToTop(sampleTimestamp: sampleTimestamp, metrics: metrics, transientLostStartedAt: transientLostStartedAt)
+            }
             switch pikePhase {
-            case .pikeReady, .pikeBroken:
-                pikePhase = .pikeUp
-                pikeTopHeadY = metrics?.headY
-                pikeTopShoulderY = metrics?.shoulderY
-                pikeTopElbowAngle = metrics?.elbowAngle
+            case .pikeTrackingOneSide, .pikeTrackingBothSides, .pikeReadyOneSide, .pikeReadyBothSides, .pikeBrokenNoUsableSide, .pikeBrokenMissingUpperBody, .pikeBrokenMissingLowerBody, .pikeBrokenHips, .pikeBrokenLegs, .pikeBrokenNotInvertedV, .pikeBrokenArms, .pikeBrokenSupport:
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptArmedAtTop
                 return false
-            case .pikeDown:
-                guard pikeMovementWasMeaningful() else {
-                    pikePhase = .pikeUp
-                    pikeTopHeadY = metrics?.headY
-                    pikeTopShoulderY = metrics?.shoulderY
-                    pikeTopElbowAngle = metrics?.elbowAngle
-                    return false
-                }
-                repCount += 1
-                pikePhase = .pikeUp
-                pikeTopHeadY = metrics?.headY
-                pikeTopShoulderY = metrics?.shoulderY
-                pikeTopElbowAngle = metrics?.elbowAngle
-                return true
-            case .pikeUp:
-                pikeTopHeadY = metrics?.headY
-                pikeTopShoulderY = metrics?.shoulderY
-                pikeTopElbowAngle = metrics?.elbowAngle
+            case .pikeDownOneSide, .pikeDownBothSides:
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptArmedAtTop
+                return false
+            case .pikeUpOneSide, .pikeUpBothSides, .pikeCounted:
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptArmedAtTop
+                return false
+            case .pikeAttemptTransientLost, .pikeAttemptResetLostTooLong, .pikeAttemptResetNoRealElbowBend, .pikeAttemptResetLeftExercise, .pikeAttemptArmedAtTop:
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptArmedAtTop
+                return false
+            case .pikeAttemptDownSeen, .pikeAttemptWaitingReturn:
+                pikeCountBlockedReason = "invalid attempt"
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptReturnTopNoCountInvalidAttempt
+                return false
+            case .pikeAttemptCounted:
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptArmedAtTop
+                return false
+            case .pikeAttemptReturnTopNoCountCooldown, .pikeAttemptReturnTopNoCountNoRealElbowBend, .pikeAttemptReturnTopNoCountLostTooLong, .pikeAttemptReturnTopNoCountInvalidAttempt, .pikeAttemptReturnTopCounted:
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+                pikePhase = .pikeAttemptArmedAtTop
                 return false
             }
         }
 
         if bottom.isValid {
+            updatePikeAttemptMetrics(with: bottom.metrics)
+            pikeCurrentElbowAngle = bottom.metrics?.elbowAngle
+            let canDescendFromTop = pikePhase == .pikeUpOneSide || pikePhase == .pikeUpBothSides
+            let canDescendFromAttempt = pikeAttemptState == .armedAtTop || pikeAttemptState == .downSeen || pikeAttemptState == .waitingForReturn
+            guard canDescendFromTop || canDescendFromAttempt else {
+                if pikePhase == .pikeCounted || pikeAttemptState == .cooldown {
+                    return false
+                }
+                pikePhase = .pikeTrackingOneSide
+                return false
+            }
             pikeBottomHeadY = bottom.metrics?.headY
             pikeBottomShoulderY = bottom.metrics?.shoulderY
             pikeBottomElbowAngle = bottom.metrics?.elbowAngle
-            pikePhase = .pikeDown
+            pikeBottomBestSide = bottom.metrics?.bestSide
+            pikeAttemptDownTime = sampleTimestamp
+            pikeAttemptState = .downSeen
+            if pikeMinElbowAngleDuringAttempt == nil {
+                pikeMinElbowAngleDuringAttempt = bottom.metrics?.elbowAngle
+            }
+            pikePhase = .pikeAttemptDownSeen
             return false
         }
 
-        if pikeTopPoseResult(points: points, allowBentArms: true).isValid {
-            pikePhase = .pikeReady
-        } else {
-            pikePhase = .pikeBroken
+        if relaxedTop.isValid {
+            updatePikeAttemptMetrics(with: relaxedTop.metrics)
+            pikeCurrentElbowAngle = relaxedTop.metrics?.elbowAngle
+            if pikeAttemptState == .downSeen || pikeAttemptState == .waitingForReturn {
+                pikeAttemptState = .waitingForReturn
+                pikePhase = .pikeAttemptWaitingReturn
+            } else {
+                pikePhase = relaxedTop.metrics?.usableSideCount == 2 ? .pikeTrackingBothSides : .pikeTrackingOneSide
+            }
+            return false
         }
+
+        handlePikeTransientLoss(sampleTimestamp: sampleTimestamp, failurePhase: relaxedTop.debugPhase)
         return false
     }
 
-    private func pikeMovementWasMeaningful() -> Bool {
+    private func pikeMovementWasMeaningful(top: PikePoseMetrics?) -> Bool {
+        let topElbowAngle = pikeAttemptTopElbowAngle ?? pikeTopElbowAngle
+        let bottomElbowAngle = pikeAttemptBottomElbowAngle ?? pikeBottomElbowAngle ?? pikeMinElbowAngleDuringAttempt
         guard
             let topHeadY = pikeTopHeadY,
             let topShoulderY = pikeTopShoulderY,
-            let topElbowAngle = pikeTopElbowAngle,
+            let resolvedTopElbowAngle = topElbowAngle,
             let bottomHeadY = pikeBottomHeadY,
             let bottomShoulderY = pikeBottomShoulderY,
-            let bottomElbowAngle = pikeBottomElbowAngle
+            let resolvedBottomElbowAngle = bottomElbowAngle
         else {
-            return true
+            return top?.elbowsBent == true
         }
 
         let scale = max(0.04, abs(topShoulderY - topHeadY) * 3)
-        let headDrop = bottomHeadY - topHeadY
-        let shoulderDrop = bottomShoulderY - topShoulderY
-        let elbowChange = topElbowAngle - bottomElbowAngle
-        return headDrop >= scale * 0.12 || shoulderDrop >= scale * 0.10 || elbowChange >= 25
+        let headDrop = topHeadY - bottomHeadY
+        let shoulderDrop = topShoulderY - bottomShoulderY
+        let elbowChange = resolvedTopElbowAngle - resolvedBottomElbowAngle
+        return elbowChange >= pikeElbowDeltaThreshold
+            && (headDrop >= scale * 0.05 || shoulderDrop >= scale * 0.04 || resolvedBottomElbowAngle <= pikeDownElbowMax)
     }
 
-    private func pikeTopPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], allowBentArms: Bool = false) -> (isValid: Bool, debugState: String, metrics: PikePoseMetrics?) {
+    private func resolvePikeReturnToTop(
+        sampleTimestamp: CFTimeInterval,
+        metrics: PikePoseMetrics?,
+        transientLostStartedAt: CFTimeInterval?
+    ) -> Bool {
+        let priorState = pikeAttemptState
+        let blockedOutcome = evaluatePikeReturnToTop(sampleTimestamp: sampleTimestamp, metrics: metrics, transientLostStartedAt: transientLostStartedAt)
+
+        switch blockedOutcome {
+        case .counted:
+            repCount += 1
+            pikeLastCountedAt = sampleTimestamp
+            armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+            pikeAttemptState = .cooldown
+            pikeCountBlockedReason = nil
+            pikePhase = .pikeAttemptReturnTopCounted
+            return true
+        case .cooldown:
+            pikeCountBlockedReason = "cooldown"
+            armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+            pikePhase = .pikeAttemptReturnTopNoCountCooldown
+            return false
+        case .noRealElbowBend:
+            pikeCountBlockedReason = "no real elbow bend"
+            resetPikeAttemptForNoRealElbowBend(sampleTimestamp: sampleTimestamp, metrics: metrics)
+            pikePhase = .pikeAttemptReturnTopNoCountNoRealElbowBend
+            return false
+        case .lostTooLong:
+            pikeCountBlockedReason = "lost too long"
+            resetPikeAttempt()
+            armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+            pikePhase = .pikeAttemptReturnTopNoCountLostTooLong
+            return false
+        case .invalidAttempt:
+            pikeCountBlockedReason = "invalid attempt"
+            if priorState == .downSeen || priorState == .waitingForReturn {
+                armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+            }
+            pikePhase = .pikeAttemptReturnTopNoCountInvalidAttempt
+            return false
+        }
+    }
+
+    private func evaluatePikeReturnToTop(
+        sampleTimestamp: CFTimeInterval,
+        metrics: PikePoseMetrics?,
+        transientLostStartedAt: CFTimeInterval?
+    ) -> PikeReturnTopOutcome {
+        guard pikeAttemptState == .downSeen || pikeAttemptState == .waitingForReturn else {
+            return .invalidAttempt
+        }
+        if let transientLostStartedAt, sampleTimestamp - transientLostStartedAt > pikeTransientLossTolerance {
+            return .lostTooLong
+        }
+        if sampleTimestamp - pikeLastCountedAt < pikeRepCooldown {
+            return .cooldown
+        }
+        guard pikeAttemptDownTime != nil else {
+            return .invalidAttempt
+        }
+        guard pikeMovementWasMeaningful(top: metrics) else {
+            return .noRealElbowBend
+        }
+        return .counted
+    }
+
+    private func pikeTopPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint], allowBentArms: Bool = false) -> (isValid: Bool, debugPhase: PikePushUpPhase, metrics: PikePoseMetrics?) {
         guard let metrics = pikePoseMetrics(points: points) else {
-            return (false, PikePushUpPhase.pikeBroken.rawValue, nil)
+            return (false, .pikeBrokenNoUsableSide, nil)
         }
 
-        guard metrics.hipsHigh else {
-            return (false, "pikeBroken hips", metrics)
+        guard metrics.hasUpperBody else {
+            return (false, .pikeBrokenMissingUpperBody, metrics)
         }
-        guard metrics.legsStraight else {
-            return (false, "pikeBroken legs", metrics)
+        guard metrics.hasLowerBody else {
+            return (false, .pikeBrokenMissingLowerBody, metrics)
+        }
+        guard metrics.hipsHigh else {
+            return (false, .pikeBrokenHips, metrics)
+        }
+        guard metrics.legsStraightEnough else {
+            return (false, .pikeBrokenLegs, metrics)
         }
         guard metrics.invertedV else {
-            return (false, PikePushUpPhase.pikeBroken.rawValue, metrics)
+            return (false, .pikeBrokenNotInvertedV, metrics)
         }
-        guard allowBentArms || metrics.armsStraight else {
-            return (false, PikePushUpPhase.pikeDown.rawValue, metrics)
+        guard allowBentArms || metrics.armsExtendedEnough else {
+            return (false, .pikeBrokenArms, metrics)
         }
         guard metrics.supportLooksGood else {
-            return (false, PikePushUpPhase.pikeBroken.rawValue, metrics)
+            return (false, .pikeBrokenSupport, metrics)
         }
-        return (true, PikePushUpPhase.pikeUp.rawValue, metrics)
+        return (true, metrics.usableSideCount == 2 ? .pikeUpBothSides : .pikeUpOneSide, metrics)
     }
 
-    private func pikeBottomPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isValid: Bool, debugState: String, metrics: PikePoseMetrics?) {
+    private func pikeBottomPoseResult(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> (isValid: Bool, debugPhase: PikePushUpPhase, metrics: PikePoseMetrics?) {
         guard let metrics = pikePoseMetrics(points: points) else {
-            return (false, PikePushUpPhase.pikeBroken.rawValue, nil)
+            return (false, .pikeBrokenNoUsableSide, nil)
         }
 
-        guard metrics.hipsHigh else {
-            return (false, "pikeBroken hips", metrics)
+        guard metrics.hasUpperBody else {
+            return (false, .pikeBrokenMissingUpperBody, metrics)
         }
-        guard metrics.legsStraight else {
-            return (false, "pikeBroken legs", metrics)
+        guard metrics.hasLowerBody else {
+            return (false, .pikeBrokenMissingLowerBody, metrics)
+        }
+        guard metrics.hipsHigh else {
+            return (false, .pikeBrokenHips, metrics)
+        }
+        guard metrics.legsStraightEnough else {
+            return (false, .pikeBrokenLegs, metrics)
+        }
+        guard metrics.invertedV else {
+            return (false, .pikeBrokenNotInvertedV, metrics)
         }
         guard metrics.elbowsBent else {
-            return (false, PikePushUpPhase.pikeReady.rawValue, metrics)
+            return (false, metrics.usableSideCount == 2 ? .pikeReadyBothSides : .pikeReadyOneSide, metrics)
         }
 
         let scale = max(0.04, metrics.torsoLength)
-        let headNearHands = metrics.headY >= metrics.wristY - scale * 0.25
-        let shouldersLowered = pikeTopShoulderY.map { metrics.shoulderY > $0 + scale * 0.08 } ?? true
-        guard headNearHands || shouldersLowered else {
-            return (false, PikePushUpPhase.pikeReady.rawValue, metrics)
+        let headNearHands = metrics.headLowered || isLowerThan(metrics.headY, metrics.wristY, margin: scale * 0.25)
+        let shouldersLowered = metrics.shouldersLowered || pikeTopShoulderY.map { isLowerThan(metrics.shoulderY, $0, margin: scale * 0.05) } ?? true
+        guard metrics.supportLooksGood else {
+            return (false, .pikeBrokenSupport, metrics)
         }
-        return (true, PikePushUpPhase.pikeDown.rawValue, metrics)
+        guard headNearHands || shouldersLowered else {
+            return (false, metrics.usableSideCount == 2 ? .pikeReadyBothSides : .pikeReadyOneSide, metrics)
+        }
+        return (true, metrics.usableSideCount == 2 ? .pikeDownBothSides : .pikeDownOneSide, metrics)
     }
 
     private func pikePoseMetrics(points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint]) -> PikePoseMetrics? {
+        let left = pikeSideMetrics(points: points, side: .left)
+        let right = pikeSideMetrics(points: points, side: .right)
+        let usableSides = [left, right].compactMap { $0 }
+        guard let best = usableSides.max(by: { $0.reliabilityScore < $1.reliabilityScore }) else {
+            return nil
+        }
+
+        let averageElbowAngle = usableSides.map(\.elbowAngle).reduce(0, +) / CGFloat(usableSides.count)
+        let averageKneeAngle = usableSides.map(\.kneeAngle).reduce(0, +) / CGFloat(usableSides.count)
+        let averageHipAngle = usableSides.map(\.shoulderHipKneeAngle).reduce(0, +) / CGFloat(usableSides.count)
+        let headY = usableSides.map(\.headY).reduce(0, +) / CGFloat(usableSides.count)
+        let shoulderY = usableSides.map(\.shoulderY).reduce(0, +) / CGFloat(usableSides.count)
+        let wristY = usableSides.map(\.wristY).reduce(0, +) / CGFloat(usableSides.count)
+        let torsoLength = usableSides.map(\.torsoLength).reduce(0, +) / CGFloat(usableSides.count)
+        let headLowered = usableSides.contains(where: \.headLowered)
+        let shouldersLowered = usableSides.contains(where: \.shouldersLowered)
+        let supportLooksGood = usableSides.contains(where: \.supportLooksGood)
+        let hipsHigh = usableSides.contains(where: \.hipsHigh)
+        let invertedV = usableSides.contains(where: \.invertedV)
+        let legsStraightEnough = usableSides.contains(where: \.legsStraightEnough)
+        let hasUpperBody = !usableSides.isEmpty
+        let hasLowerBody = !usableSides.isEmpty
+
+        return PikePoseMetrics(
+            bestSide: best.side,
+            usableSideCount: usableSides.count,
+            torsoLength: torsoLength,
+            headY: headY,
+            shoulderY: shoulderY,
+            wristY: wristY,
+            elbowAngle: averageElbowAngle,
+            kneeAngle: averageKneeAngle,
+            shoulderHipKneeAngle: averageHipAngle,
+            hasUpperBody: hasUpperBody,
+            hasLowerBody: hasLowerBody,
+            hipsHigh: hipsHigh,
+            armsExtendedEnough: averageElbowAngle >= pikeExtendedThreshold,
+            elbowsBent: (pikeDownElbowMin...pikeDownElbowMax).contains(averageElbowAngle),
+            legsStraightEnough: legsStraightEnough || averageKneeAngle >= 132,
+            invertedV: invertedV || (50...128).contains(averageHipAngle),
+            supportLooksGood: supportLooksGood,
+            headLowered: headLowered,
+            shouldersLowered: shouldersLowered
+        )
+    }
+
+    private func pikeSideMetrics(
+        points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint],
+        side: BodySide
+    ) -> PikeSideMetrics? {
+        let shoulderJoint: VNHumanBodyPoseObservation.JointName = side == .left ? .leftShoulder : .rightShoulder
+        let elbowJoint: VNHumanBodyPoseObservation.JointName = side == .left ? .leftElbow : .rightElbow
+        let wristJoint: VNHumanBodyPoseObservation.JointName = side == .left ? .leftWrist : .rightWrist
+        let hipJoint: VNHumanBodyPoseObservation.JointName = side == .left ? .leftHip : .rightHip
+        let kneeJoint: VNHumanBodyPoseObservation.JointName = side == .left ? .leftKnee : .rightKnee
+        let ankleJoint: VNHumanBodyPoseObservation.JointName = side == .left ? .leftAnkle : .rightAnkle
+
         guard
-            let shoulderCenter = averagePoint(points: points, joints: [.leftShoulder, .rightShoulder]),
-            let hipCenter = averagePoint(points: points, joints: [.leftHip, .rightHip]),
-            let wristCenter = averagePoint(points: points, joints: [.leftWrist, .rightWrist]),
-            let kneeCenter = averagePoint(points: points, joints: [.leftKnee, .rightKnee])
+            let shoulder = validPoint(points[shoulderJoint]),
+            let elbow = validPoint(points[elbowJoint]),
+            let wrist = validPoint(points[wristJoint]),
+            let hip = validPoint(points[hipJoint]),
+            let knee = validPoint(points[kneeJoint])
         else {
             return nil
         }
 
-        let ankleCenter = averagePoint(points: points, joints: [.leftAnkle, .rightAnkle]) ?? kneeCenter
-        let headPoint = averagePoint(points: points, joints: [.nose, .neck]) ?? shoulderCenter
-        let torsoLength = max(0.04, distance(shoulderCenter, hipCenter))
-        let hipMargin = torsoLength * 0.15
-        let hipsHigh = hipCenter.y < shoulderCenter.y - hipMargin
-            && hipCenter.y < kneeCenter.y - hipMargin
-            && hipCenter.y < ankleCenter.y - hipMargin * 0.6
+        let ankle = validPoint(points[ankleJoint]) ?? knee
+        let headPoint = averagePoint(points: points, joints: [.nose, .neck]) ?? shoulder
+        let elbowAngle = angle(first: shoulder, middle: elbow, last: wrist)
+        let kneeAngle = validPoint(points[ankleJoint]).map { angle(first: hip, middle: knee, last: $0) } ?? 180
+        let shoulderHipKneeAngle = angle(first: shoulder, middle: hip, last: knee)
+        let torsoLength = max(0.04, distance(shoulder, hip))
+        let hipMargin = torsoLength * 0.08
+        let hipsHigh = isHigherThan(hip.y, shoulder.y, margin: hipMargin)
+            && isHigherThan(hip.y, knee.y, margin: hipMargin * 0.5)
+            && isHigherThan(hip.y, ankle.y, margin: hipMargin * 0.2)
+        let invertedV = (50...128).contains(shoulderHipKneeAngle)
+        let supportLooksGood = isLowerThan(wrist.y, shoulder.y, margin: torsoLength * 0.28)
+            && abs(wrist.x - shoulder.x) / torsoLength <= 1.95
+        let headLowered = pikeTopHeadY.map { isLowerThan(headPoint.y, $0, margin: torsoLength * 0.04) } ?? false
+        let shouldersLowered = pikeTopShoulderY.map { isLowerThan(shoulder.y, $0, margin: torsoLength * 0.04) } ?? false
+        let reliabilityScore = torsoLength
+            + (validPoint(points[ankleJoint]) == nil ? 0 : 0.2)
+            + (supportLooksGood ? 0.15 : 0)
+            + (invertedV ? 0.15 : 0)
 
-        guard let elbowAngle = bestAngle(
-            points: points,
-            firstCandidates: [.leftShoulder, .rightShoulder],
-            middleCandidates: [.leftElbow, .rightElbow],
-            lastCandidates: [.leftWrist, .rightWrist]
-        ) else {
-            return nil
-        }
-
-        let kneeAngle = bestAngle(
-            points: points,
-            firstCandidates: [.leftHip, .rightHip],
-            middleCandidates: [.leftKnee, .rightKnee],
-            lastCandidates: [.leftAnkle, .rightAnkle]
-        ) ?? 180
-
-        let shoulderHipKnee = bestAngle(
-            points: points,
-            firstCandidates: [.leftShoulder, .rightShoulder],
-            middleCandidates: [.leftHip, .rightHip],
-            lastCandidates: [.leftKnee, .rightKnee]
-        ) ?? angle(first: shoulderCenter, middle: hipCenter, last: kneeCenter)
-
-        let wristShoulderDistance = abs(wristCenter.x - shoulderCenter.x)
-        let supportLooksGood = wristCenter.y > shoulderCenter.y - torsoLength * 0.15
-            && wristShoulderDistance / torsoLength <= 1.55
-
-        return PikePoseMetrics(
+        return PikeSideMetrics(
+            side: side,
             torsoLength: torsoLength,
             headY: headPoint.y,
-            shoulderY: shoulderCenter.y,
-            wristY: wristCenter.y,
+            shoulderY: shoulder.y,
+            wristY: wrist.y,
             elbowAngle: elbowAngle,
+            kneeAngle: kneeAngle,
+            shoulderHipKneeAngle: shoulderHipKneeAngle,
             hipsHigh: hipsHigh,
-            armsStraight: elbowAngle >= pikeExtendedThreshold,
-            elbowsBent: (pikeDownElbowMin...pikeDownElbowMax).contains(elbowAngle),
-            legsStraight: kneeAngle >= pikeExtendedThreshold,
-            invertedV: (45...115).contains(shoulderHipKnee),
-            supportLooksGood: supportLooksGood
+            legsStraightEnough: kneeAngle >= 132,
+            supportLooksGood: supportLooksGood,
+            invertedV: invertedV,
+            headLowered: headLowered,
+            shouldersLowered: shouldersLowered,
+            reliabilityScore: reliabilityScore
+        )
+    }
+
+    private func isHigherThan(_ a: CGFloat, _ b: CGFloat, margin: CGFloat = 0) -> Bool {
+        a > b + margin
+    }
+
+    private func isLowerThan(_ a: CGFloat, _ b: CGFloat, margin: CGFloat = 0) -> Bool {
+        a < b - margin
+    }
+
+    private func armPikeAttemptAtTop(sampleTimestamp: CFTimeInterval, metrics: PikePoseMetrics?) {
+        pikeTopHeadY = metrics?.headY
+        pikeTopShoulderY = metrics?.shoulderY
+        pikeTopElbowAngle = metrics?.elbowAngle
+        pikeTopBestSide = metrics?.bestSide
+        pikeAttemptTopTime = sampleTimestamp
+        pikeAttemptTopElbowAngle = metrics?.elbowAngle
+        pikeAttemptBestSide = metrics?.bestSide ?? pikeAttemptBestSide
+        pikeTransientLostStartedAt = nil
+        pikeAttemptState = sampleTimestamp - pikeLastCountedAt < pikeRepCooldown ? .cooldown : .armedAtTop
+    }
+
+    private func updatePikeAttemptMetrics(with metrics: PikePoseMetrics?) {
+        guard let metrics else { return }
+        pikeAttemptBestSide = metrics.bestSide
+        if let currentMin = pikeMinElbowAngleDuringAttempt {
+            pikeMinElbowAngleDuringAttempt = min(currentMin, metrics.elbowAngle)
+        } else {
+            pikeMinElbowAngleDuringAttempt = metrics.elbowAngle
+        }
+        if metrics.elbowsBent {
+            pikeAttemptBottomElbowAngle = metrics.elbowAngle
+        }
+    }
+
+    private func handlePikeTransientLoss(sampleTimestamp: CFTimeInterval, failurePhase: PikePushUpPhase) {
+        pikeCurrentElbowAngle = nil
+        if pikeAttemptState == .downSeen || pikeAttemptState == .waitingForReturn {
+            if pikeTransientLostStartedAt == nil {
+                pikeTransientLostStartedAt = sampleTimestamp
+            }
+            let lostDuration = sampleTimestamp - (pikeTransientLostStartedAt ?? sampleTimestamp)
+            if lostDuration <= pikeTransientLossTolerance {
+                pikeAttemptState = .waitingForReturn
+                pikePhase = .pikeAttemptTransientLost
+                return
+            }
+            resetPikeAttemptForLostTooLong()
+            return
+        }
+
+        if pikeAttemptState == .armedAtTop {
+            resetPikeAttempt()
+            pikePhase = .pikeAttemptResetLeftExercise
+            return
+        }
+
+        if pikeAttemptState == .cooldown && sampleTimestamp - pikeLastCountedAt < pikeRepCooldown {
+            pikePhase = .pikeAttemptCounted
+            return
+        }
+
+        pikePhase = failurePhase
+    }
+
+    private func resetPikeAttemptForLostTooLong() {
+        resetPikeAttempt()
+        pikeCountBlockedReason = "lost too long"
+        pikePhase = .pikeAttemptResetLostTooLong
+    }
+
+    private func resetPikeAttemptForNoRealElbowBend(sampleTimestamp: CFTimeInterval, metrics: PikePoseMetrics?) {
+        resetPikeAttempt()
+        pikeCountBlockedReason = "no real elbow bend"
+        armPikeAttemptAtTop(sampleTimestamp: sampleTimestamp, metrics: metrics)
+        pikePhase = .pikeAttemptResetNoRealElbowBend
+    }
+
+    private func resetPikeAttempt() {
+        pikeAttemptState = .waitingForPikeUp
+        pikeAttemptTopTime = nil
+        pikeAttemptDownTime = nil
+        pikeLastUsablePikeTime = nil
+        pikeMinElbowAngleDuringAttempt = nil
+        pikeAttemptTopElbowAngle = nil
+        pikeAttemptBottomElbowAngle = nil
+        pikeAttemptBestSide = nil
+        pikeTransientLostStartedAt = nil
+        pikeCurrentElbowAngle = nil
+        pikeReturnToTopDetected = false
+        pikeCountBlockedReason = nil
+    }
+
+    private func currentPikeAttemptDebugMetrics() -> PikeAttemptDebugMetrics? {
+        guard mode == .pikePushUps else { return nil }
+        let topAngle = pikeAttemptTopElbowAngle ?? pikeTopElbowAngle
+        let bottomAngle = pikeAttemptBottomElbowAngle ?? pikeBottomElbowAngle ?? pikeMinElbowAngleDuringAttempt
+        let delta = (topAngle != nil && bottomAngle != nil) ? (topAngle! - bottomAngle!) : nil
+        let topAngleValue: Double? = topAngle.map { Double($0) }
+        let bottomAngleValue: Double? = bottomAngle.map { Double($0) }
+        let currentAngleValue: Double? = pikeCurrentElbowAngle.map { Double($0) }
+        let deltaValue: Double? = delta.map { Double($0) }
+        let lastDownSeenTime: Double? = pikeAttemptDownTime.map { Double($0) }
+        let lastTopSeenTime: Double? = pikeAttemptTopTime.map { Double($0) }
+        return PikeAttemptDebugMetrics(
+            phase: pikeAttemptState.debugName,
+            bestSide: pikeAttemptBestSide?.debugName,
+            topElbowAngle: topAngleValue,
+            bottomElbowAngle: bottomAngleValue,
+            currentElbowAngle: currentAngleValue,
+            elbowAngleDelta: deltaValue,
+            lastDownSeenTime: lastDownSeenTime,
+            lastTopSeenTime: lastTopSeenTime,
+            returnToTopDetected: pikeReturnToTopDetected,
+            countBlockedReason: pikeCountBlockedReason
         )
     }
 
@@ -4153,7 +4765,8 @@ private final class PoseDetectionService: NSObject, AVCaptureVideoDataOutputSamp
             isPersonDetected: isPersonDetected,
             isStartingPoseDetected: isStartingPoseDetected,
             posePoints: posePoints,
-            videoSize: videoSize
+            videoSize: videoSize,
+            pikeAttemptMetrics: currentPikeAttemptDebugMetrics()
         )
         diagnosticsPublishes += 1
 
@@ -4208,17 +4821,43 @@ private struct AbsMetrics {
 }
 
 private struct PikePoseMetrics {
+    let bestSide: BodySide
+    let usableSideCount: Int
     let torsoLength: CGFloat
     let headY: CGFloat
     let shoulderY: CGFloat
     let wristY: CGFloat
     let elbowAngle: CGFloat
+    let kneeAngle: CGFloat
+    let shoulderHipKneeAngle: CGFloat
+    let hasUpperBody: Bool
+    let hasLowerBody: Bool
     let hipsHigh: Bool
-    let armsStraight: Bool
+    let armsExtendedEnough: Bool
     let elbowsBent: Bool
-    let legsStraight: Bool
+    let legsStraightEnough: Bool
     let invertedV: Bool
     let supportLooksGood: Bool
+    let headLowered: Bool
+    let shouldersLowered: Bool
+}
+
+private struct PikeSideMetrics {
+    let side: BodySide
+    let torsoLength: CGFloat
+    let headY: CGFloat
+    let shoulderY: CGFloat
+    let wristY: CGFloat
+    let elbowAngle: CGFloat
+    let kneeAngle: CGFloat
+    let shoulderHipKneeAngle: CGFloat
+    let hipsHigh: Bool
+    let legsStraightEnough: Bool
+    let supportLooksGood: Bool
+    let invertedV: Bool
+    let headLowered: Bool
+    let shouldersLowered: Bool
+    let reliabilityScore: CGFloat
 }
 
 private enum ExercisePosition {
@@ -4242,18 +4881,107 @@ private enum MountainClimberPhase: String {
     case leftKneeDrive = "left knee drive"
     case rightKneeDrive = "right knee drive"
     case waitingForAlternation = "waiting for alternation"
+    case phaseWaitingForStablePlank = "mountainClimbers phase: waiting for stable plank"
+    case phaseArmed = "mountainClimbers phase: armed"
+    case phaseKneeDriveSeen = "mountainClimbers phase: knee drive seen"
+    case countedReturnedCycle = "mountainClimbers counted: returned cycle"
+    case rejectionCooldown = "mountainClimbers rejected: cooldown"
+    case rejectionNoStablePlank = "mountainClimbers rejected: no stable plank"
+    case rejectionMissingKeypoints = "mountainClimbers rejected: missing keypoints"
+    case rejectionSameSideRepeat = "mountainClimbers rejected: same-side repeat"
+    case rejectionBodyNotPlankLike = "mountainClimbers rejected: body not plank-like / transition"
+    case rejectionUnstableTransition = "mountainClimbers rejected: unstable transition"
+    case rejectionInsufficientPlankAnchors = "mountainClimbers rejected: insufficient plank anchors"
+    case rejectionNoUsableLegChain = "mountainClimbers rejected: no usable leg chain"
+}
+
+private enum MountainClimberCyclePhase {
+    case waitingForStablePlank
+    case armedInPlank
+    case kneeDriveSeen
+    case countedWaitingForReturn
 }
 
 private enum PikePushUpPhase: String {
-    case pikeReady = "pikeReady"
-    case pikeDown = "pikeDown"
-    case pikeUp = "pikeUp"
-    case pikeBroken = "pikeBroken"
+    case pikeTrackingOneSide = "pikeTracking one side"
+    case pikeTrackingBothSides = "pikeTracking both sides"
+    case pikeBrokenNoUsableSide = "pikeBroken no usable side"
+    case pikeBrokenMissingUpperBody = "pikeBroken missing upper body"
+    case pikeBrokenMissingLowerBody = "pikeBroken missing lower body"
+    case pikeBrokenHips = "pikeBroken hips"
+    case pikeBrokenLegs = "pikeBroken legs"
+    case pikeBrokenNotInvertedV = "pikeBroken not inverted V"
+    case pikeBrokenArms = "pikeBroken arms"
+    case pikeBrokenSupport = "pikeBroken support"
+    case pikeReadyOneSide = "pikeReady one side"
+    case pikeReadyBothSides = "pikeReady both sides"
+    case pikeUpOneSide = "pikeUp one side"
+    case pikeUpBothSides = "pikeUp both sides"
+    case pikeDownOneSide = "pikeDown one side"
+    case pikeDownBothSides = "pikeDown both sides"
+    case pikeCounted = "pikeCounted"
+    case pikeAttemptArmedAtTop = "pikeAttempt armed at top"
+    case pikeAttemptDownSeen = "pikeAttempt down seen"
+    case pikeAttemptWaitingReturn = "pikeAttempt waiting return"
+    case pikeAttemptTransientLost = "pikeAttempt transient lost"
+    case pikeAttemptCounted = "pikeAttempt counted"
+    case pikeAttemptResetLostTooLong = "pikeAttempt reset lost too long"
+    case pikeAttemptResetNoRealElbowBend = "pikeAttempt reset no real elbow bend"
+    case pikeAttemptResetLeftExercise = "pikeAttempt reset left exercise"
+    case pikeAttemptReturnTopNoCountCooldown = "pikeAttempt return top no count: cooldown"
+    case pikeAttemptReturnTopNoCountNoRealElbowBend = "pikeAttempt return top no count: no real elbow bend"
+    case pikeAttemptReturnTopNoCountLostTooLong = "pikeAttempt return top no count: lost too long"
+    case pikeAttemptReturnTopNoCountInvalidAttempt = "pikeAttempt return top no count: invalid attempt"
+    case pikeAttemptReturnTopCounted = "pikeAttempt return top counted"
+}
+
+private enum PikeAttemptState {
+    case waitingForPikeUp
+    case armedAtTop
+    case downSeen
+    case waitingForReturn
+    case cooldown
+}
+
+private enum PikeReturnTopOutcome {
+    case counted
+    case cooldown
+    case noRealElbowBend
+    case lostTooLong
+    case invalidAttempt
 }
 
 private enum BodySide {
     case left
     case right
+}
+
+private extension PikeAttemptState {
+    var debugName: String {
+        switch self {
+        case .waitingForPikeUp:
+            return "waitingForPikeUp"
+        case .armedAtTop:
+            return "armedAtTop"
+        case .downSeen:
+            return "downSeen"
+        case .waitingForReturn:
+            return "waitingForReturn"
+        case .cooldown:
+            return "cooldown"
+        }
+    }
+}
+
+private extension BodySide {
+    var debugName: String {
+        switch self {
+        case .left:
+            return "left"
+        case .right:
+            return "right"
+        }
+    }
 }
 
 private enum VoiceCommand {
@@ -4322,6 +5050,11 @@ private final class VoiceCommandService {
         recognitionRequest = nil
         isRunning = false
         onStatus?(nil)
+    }
+
+    func stopForAppTermination() {
+        stop()
+        DiagnosticLog.log("voice stopped")
     }
 
     private func startRecognition(with recognizer: SFSpeechRecognizer) throws {
@@ -4493,6 +5226,15 @@ private final class VoiceCommandService {
             guard let range = text.range(of: keyword, options: [.caseInsensitive, .backwards]) else { return nil }
             return text.distance(from: text.startIndex, to: range.lowerBound)
         }.max()
+    }
+}
+
+@MainActor
+private final class WeakCameraModelRef {
+    weak var model: CameraModel?
+
+    init(_ model: CameraModel) {
+        self.model = model
     }
 }
 

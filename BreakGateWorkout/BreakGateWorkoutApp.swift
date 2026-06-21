@@ -26,6 +26,43 @@ enum DiagnosticLog {
     }
 }
 
+@MainActor
+final class AppShutdownCoordinator {
+    static let shared = AppShutdownCoordinator()
+
+    private var isCleanupPerformed = false
+    private var terminationRequested = false
+
+    private init() {}
+
+    func requestTermination() {
+        DiagnosticLog.log("shutdown requested")
+        performCleanupIfNeeded()
+
+        guard !terminationRequested else { return }
+        terminationRequested = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            DiagnosticLog.log("terminating app")
+            NSApplication.shared.terminate(nil)
+        }
+    }
+
+    func applicationWillTerminateFallback() {
+        DiagnosticLog.log("shutdown fallback requested")
+        performCleanupIfNeeded()
+    }
+
+    private func performCleanupIfNeeded() {
+        guard !isCleanupPerformed else { return }
+        isCleanupPerformed = true
+
+        SoundFeedbackService.shared.stopAllImmediatelyForShutdown()
+        CameraModel.shutdownAllForAppTermination()
+        SoftGateWindowController.shared.prepareForTermination()
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DiagnosticLog.log("app launch")
@@ -40,6 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Task { @MainActor in
+            AppShutdownCoordinator.shared.applicationWillTerminateFallback()
+        }
     }
 
     private func requestCameraPermissionEarly() {
@@ -343,7 +386,11 @@ private struct MenuBarControlView: View {
         }
         .id(menuContentID)
         .padding(14)
-        .frame(width: menuOuterWidth, height: menuHeight, alignment: .topLeading)
+        .frame(
+            width: menuOuterWidth,
+            height: menuHeight,
+            alignment: monitor.gateActive ? .center : .topLeading
+        )
         .background(Color.black.opacity(0.20))
         .onAppear {
             cancelPendingMenuReset()
@@ -394,7 +441,7 @@ private struct MenuBarControlView: View {
     }
 
     private var activeGateMenuHeight: CGFloat {
-        174 + CGFloat(max(0, estimatedPlanSummaryLines - 1)) * 20
+        182 + CGFloat(max(0, estimatedPlanSummaryLines - 1)) * 20
     }
 
     private var estimatedPlanSummaryLines: Int {
@@ -549,6 +596,7 @@ private struct MenuBarControlView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
+        .padding(.vertical, 4)
     }
 
     private var headerCard: some View {
@@ -992,7 +1040,11 @@ private struct MenuBarControlView: View {
         HStack(spacing: 7) {
             Spacer()
 
-            Button(L.t(.quit, language)) { NSApplication.shared.terminate(nil) }
+            Button(L.t(.quit, language)) {
+                Task { @MainActor in
+                    AppShutdownCoordinator.shared.requestTermination()
+                }
+            }
                 .buttonStyle(MenuActionButtonStyle(kind: .destructive))
         }
     }
@@ -1819,6 +1871,20 @@ final class SoftGateWindowController {
         }
         secondaryOverlayWindows = []
         print("BreakGateWorkout gate: closed soft gate window")
+    }
+
+    func prepareForTermination() {
+        guard let window else { return }
+
+        DiagnosticLog.log("shutdown gate window closed")
+        window.orderOut(nil)
+        window.close()
+        self.window = nil
+        secondaryOverlayWindows.forEach {
+            $0.orderOut(nil)
+            $0.close()
+        }
+        secondaryOverlayWindows = []
     }
 
     private func makeSecondaryOverlayWindows(excluding mainScreen: NSScreen?) -> [NSWindow] {

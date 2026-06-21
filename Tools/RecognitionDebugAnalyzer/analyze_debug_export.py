@@ -394,6 +394,130 @@ def detect_missed_candidates(grouped_samples: dict[int, list[dict[str, Any]]]) -
     return candidates
 
 
+def build_state_timeline_rows(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sample in samples:
+        metrics = sample.get("metrics", {})
+        pike_attempt = sample.get("pikeAttemptMetrics", {})
+        rows.append(
+            {
+                "timestampSeconds": fmt_num(sample.get("timestampSeconds")),
+                "exerciseMode": sample.get("exerciseMode", ""),
+                "repCount": sample.get("repCount", 0),
+                "currentPoseState": sample.get("currentPoseState", ""),
+                "decisionReason": sample.get("decision", {}).get("reason", ""),
+                "confidence": fmt_num(sample.get("confidence")),
+                "visibleKeypointCount": metrics.get("visibleKeypointCount"),
+                "criticalMissingForExercise": metrics.get("criticalMissingForExercise"),
+                "missingKeypoints": ",".join(metrics.get("missingKeypoints", [])),
+                "brightness": fmt_num(sample.get("averageBrightness")),
+                "pikeAttemptPhase": pike_attempt.get("phase", ""),
+                "pikeBestSide": pike_attempt.get("bestSide", ""),
+                "pikeCurrentElbowAngle": fmt_num(pike_attempt.get("currentElbowAngle")),
+                "pikeElbowAngleDelta": fmt_num(pike_attempt.get("elbowAngleDelta")),
+                "pikeReturnToTopDetected": pike_attempt.get("returnToTopDetected", ""),
+                "pikeCountBlockedReason": pike_attempt.get("countBlockedReason", ""),
+            }
+        )
+    return rows
+
+
+def build_state_transition_rows(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not samples:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    previous_state = samples[0].get("currentPoseState", "")
+    previous_rep_count = samples[0].get("repCount", 0)
+    previous_timestamp = float(samples[0].get("timestampSeconds", 0.0))
+
+    for sample in samples[1:]:
+        current_state = sample.get("currentPoseState", "")
+        current_timestamp = float(sample.get("timestampSeconds", 0.0))
+        if current_state == previous_state:
+            continue
+        rows.append(
+            {
+                "fromState": previous_state,
+                "toState": current_state,
+                "timestampSeconds": fmt_num(current_timestamp),
+                "durationOfPreviousState": fmt_num(current_timestamp - previous_timestamp),
+                "repCount": previous_rep_count,
+                "exerciseMode": sample.get("exerciseMode", ""),
+            }
+        )
+        previous_state = current_state
+        previous_rep_count = sample.get("repCount", 0)
+        previous_timestamp = current_timestamp
+
+    return rows
+
+
+def detect_pike_unconfirmed_cycles(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    grouped = exercise_group(samples)
+    for step_index, step_samples in grouped.items():
+        if not step_samples or step_samples[0].get("exerciseMode") != "pikePushUps":
+            continue
+
+        candidate_start: dict[str, Any] | None = None
+        down_seen_sample: dict[str, Any] | None = None
+        waiting_return_sample: dict[str, Any] | None = None
+
+        for sample in step_samples:
+            state = sample.get("currentPoseState", "")
+            rep_count = int(sample.get("repCount", 0))
+
+            if state == "pikeAttempt down seen":
+                candidate_start = candidate_start or sample
+                down_seen_sample = sample
+
+            if candidate_start is not None and state == "pikeAttempt waiting return":
+                waiting_return_sample = sample
+
+            if candidate_start is None:
+                continue
+
+            if state in {"pikeAttempt counted", "pikeAttempt return top counted"} and rep_count > int(candidate_start.get("repCount", 0)):
+                candidate_start = None
+                down_seen_sample = None
+                waiting_return_sample = None
+                continue
+
+            if state in {
+                "pikeAttempt armed at top",
+                "pikeAttempt return top no count: cooldown",
+                "pikeAttempt return top no count: no real elbow bend",
+                "pikeAttempt return top no count: lost too long",
+                "pikeAttempt return top no count: invalid attempt",
+            }:
+                start_rep = int(candidate_start.get("repCount", 0))
+                if rep_count <= start_rep and down_seen_sample is not None:
+                    pike_attempt = sample.get("pikeAttemptMetrics", {})
+                    metrics = sample.get("metrics", {})
+                    rows.append(
+                        {
+                            "startTimestamp": fmt_num(candidate_start.get("timestampSeconds")),
+                            "downSeenTimestamp": fmt_num(down_seen_sample.get("timestampSeconds")),
+                            "returnTimestamp": fmt_num(sample.get("timestampSeconds")),
+                            "repCountBefore": start_rep,
+                            "repCountAfter": rep_count,
+                            "fromState": down_seen_sample.get("currentPoseState", ""),
+                            "toState": state,
+                            "likelyReason": pike_attempt.get("countBlockedReason") or sample.get("decision", {}).get("reason", ""),
+                            "confidence": fmt_num(sample.get("confidence")),
+                            "visibleKeypointCount": metrics.get("visibleKeypointCount"),
+                            "missingKeypoints": ",".join(metrics.get("missingKeypoints", [])),
+                            "waitingReturnTimestamp": fmt_num(waiting_return_sample.get("timestampSeconds")) if waiting_return_sample else "",
+                        }
+                    )
+                candidate_start = None
+                down_seen_sample = None
+                waiting_return_sample = None
+
+    return rows
+
+
 def infer_missed_candidate_reason(exercise_mode: str, window: dict[str, Any]) -> str:
     top_state = window["states"].most_common(1)[0][0] if window["states"] else ""
     top_reason = window["reasons"].most_common(1)[0][0] if window["reasons"] else ""
@@ -722,6 +846,9 @@ def render_html_report(
     rep_event_rows: list[dict[str, Any]],
     suspicious_rows: list[dict[str, Any]],
     missed_rows: list[dict[str, Any]],
+    state_timeline_rows: list[dict[str, Any]],
+    state_transition_rows: list[dict[str, Any]],
+    pike_unconfirmed_rows: list[dict[str, Any]],
     failure_reasons: dict[str, Any],
     recommendations: list[str],
     skeleton_sections: list[str],
@@ -785,6 +912,18 @@ th { background: #eff6ff; }
   <section>
     <h2>Missed Movement Candidates</h2>
     {html_table(missed_rows, list(missed_rows[0].keys()) if missed_rows else ["candidateID"])}
+  </section>
+  <section>
+    <h2>State Timeline</h2>
+    {html_table(state_timeline_rows, list(state_timeline_rows[0].keys()) if state_timeline_rows else ["timestampSeconds"])}
+  </section>
+  <section>
+    <h2>State Transitions</h2>
+    {html_table(state_transition_rows, list(state_transition_rows[0].keys()) if state_transition_rows else ["fromState"])}
+  </section>
+  <section>
+    <h2>Pike Unconfirmed Cycles</h2>
+    {html_table(pike_unconfirmed_rows, list(pike_unconfirmed_rows[0].keys()) if pike_unconfirmed_rows else ["startTimestamp"])}
   </section>
   <section>
     <h2>Failure Reasons</h2>
@@ -1047,6 +1186,9 @@ def main() -> int:
         rep_event_rows = build_output_rows_for_events(rep_events)
         suspicious_rows = build_output_rows_for_events(suspicious_events)
         missed_rows = build_output_rows_for_candidates(missed_candidates)
+        state_timeline_rows = build_state_timeline_rows(samples)
+        state_transition_rows = build_state_transition_rows(samples)
+        pike_unconfirmed_rows = detect_pike_unconfirmed_cycles(samples)
 
         summary = {
             "inputPath": str(input_path),
@@ -1066,6 +1208,7 @@ def main() -> int:
             "repEventCount": len(rep_events),
             "suspiciousRepEventCount": len(suspicious_events),
             "missedCandidateCount": len(missed_candidates),
+            "pikeUnconfirmedCycleCount": len(pike_unconfirmed_rows),
             "video": {
                 "requested": metadata.get("videoRequested"),
                 "recorded": metadata.get("videoRecorded"),
@@ -1078,6 +1221,9 @@ def main() -> int:
         write_csv(output_dir / "segments.csv", segment_rows, list(segment_rows[0].keys()) if segment_rows else ["stepIndex"])
         write_csv(output_dir / "suspicious-moments.csv", suspicious_rows, list(suspicious_rows[0].keys()) if suspicious_rows else ["eventID"])
         write_csv(output_dir / "missed-candidates.csv", missed_rows, list(missed_rows[0].keys()) if missed_rows else ["candidateID"])
+        write_csv(output_dir / "state-timeline.csv", state_timeline_rows, list(state_timeline_rows[0].keys()) if state_timeline_rows else ["timestampSeconds"])
+        write_csv(output_dir / "state-transitions.csv", state_transition_rows, list(state_transition_rows[0].keys()) if state_transition_rows else ["fromState"])
+        write_csv(output_dir / "pike-unconfirmed-cycles.csv", pike_unconfirmed_rows, list(pike_unconfirmed_rows[0].keys()) if pike_unconfirmed_rows else ["startTimestamp"])
         write_csv(
             output_dir / "session-summary.csv",
             session_summary_rows,
@@ -1101,6 +1247,9 @@ def main() -> int:
             rep_event_rows=rep_event_rows,
             suspicious_rows=suspicious_rows,
             missed_rows=missed_rows,
+            state_timeline_rows=state_timeline_rows,
+            state_transition_rows=state_transition_rows,
+            pike_unconfirmed_rows=pike_unconfirmed_rows,
             failure_reasons=failure_reasons,
             recommendations=recommendations,
             skeleton_sections=skeleton_sections,

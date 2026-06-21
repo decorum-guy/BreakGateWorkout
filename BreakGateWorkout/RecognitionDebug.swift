@@ -76,6 +76,11 @@ private struct RecognitionDebugContributionView: View {
         case summary
     }
 
+    private enum ReviewCompletionAction {
+        case advance
+        case finish
+    }
+
     @ObservedObject var settings: WorkoutSettingsStore
     @StateObject private var camera = CameraModel()
     @StateObject private var recorder: RecognitionDebugRecorder
@@ -91,6 +96,7 @@ private struct RecognitionDebugContributionView: View {
     @State private var reviewComment = ""
     @State private var reviewWasManual = false
     @State private var reviewWasSkipped = false
+    @State private var reviewCompletionAction: ReviewCompletionAction = .advance
     @State private var exportURL: URL?
     @State private var exportErrorMessage: String?
     @State private var exportStatusMessage: String?
@@ -398,17 +404,31 @@ private struct RecognitionDebugContributionView: View {
                 Text(currentStep?.mode.title(language) ?? "")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
 
-                Text(currentStep?.targetText(language) ?? "")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.72))
+                if let durationText = currentStepDurationText {
+                    Text(durationText)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
 
                 Text(language == .russian
-                    ? "Выполни упражнение чётко. Программа может перейти дальше сама, либо нажми Далее после выполнения."
-                    : "Perform the exercise clearly. Continue when the app recognizes it or press Next when done."
+                    ? "Выполни упражнение чётко. Debug показывает счётчик и состояние распознавания, а переход к следующему упражнению делается только вручную."
+                    : "Perform the exercise clearly. Debug keeps the live counter and recognition state, and moving to the next exercise is manual only."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+                if currentStep?.mode == .mountainClimbers {
+                    Text(language == .russian
+                        ? "Альпинист (бета). Для лучшего распознавания поставь камеру сбоку под углом 30–45°, чтобы были видны плечи, таз, колени и стопы."
+                        : "Mountain Climbers (beta). For better recognition, place the camera at a 30–45° side angle so shoulders, hips, knees, and feet are visible."
+                    )
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.yellow.opacity(0.92))
+                    .padding(12)
+                    .background(Color.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    // TODO: Try a more camera-friendly beta variant later, such as cross-body or spider mountain climbers.
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     debugLine(language == .russian ? "Состояние" : "State", camera.currentPoseState)
@@ -423,25 +443,29 @@ private struct RecognitionDebugContributionView: View {
 
                 VStack(spacing: 10) {
                     Button {
-                        beginCurrentStep()
+                        currentStepStarted ? finishCurrentExerciseTapped() : beginCurrentStep()
                     } label: {
-                        Label(language == .russian ? "Начать" : "Start", systemImage: "play.fill")
+                        Label(
+                            currentStepStarted
+                                ? (language == .russian ? "Завершить" : "Finish")
+                                : (language == .russian ? "Начать" : "Start"),
+                            systemImage: currentStepStarted ? "stop.fill" : "play.fill"
+                        )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .primary))
-                    .disabled(currentStepStarted)
 
                     HStack(spacing: 10) {
                         Button {
-                            presentReview(manual: true, skipped: false)
+                            handleNextExerciseTapped()
                         } label: {
-                            Text(language == .russian ? "Далее" : "Next")
+                            Text(language == .russian ? "Следующее упражнение" : "Next exercise")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
 
                         Button {
-                            presentReview(manual: true, skipped: true)
+                            handleSkipTapped()
                         } label: {
                             Text(language == .russian ? "Пропустить" : "Skip")
                                 .frame(maxWidth: .infinity)
@@ -450,9 +474,17 @@ private struct RecognitionDebugContributionView: View {
                     }
 
                     Button {
-                        finishSession()
+                        resetCurrentExerciseTapped()
                     } label: {
-                        Text(language == .russian ? "Остановить тест" : "Stop Test")
+                        Text(language == .russian ? "Сбросить упражнение" : "Reset exercise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+
+                    Button {
+                        handleFinishTestTapped()
+                    } label: {
+                        Text(language == .russian ? "Завершить тест" : "Finish test")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .danger))
@@ -508,12 +540,16 @@ private struct RecognitionDebugContributionView: View {
     }
 
     private var detectedText: String {
-        guard let currentStep else { return "0 / 0" }
+        guard let currentStep else { return "0" }
         if currentStep.mode.isTimed {
-            let held = max(0, Int((camera.plankDuration - camera.plankTimeRemaining).rounded(.down)))
-            return "\(held) / \(currentStep.targetAmount)s"
+            return String(format: "%.1fs", max(0, camera.plankDuration - camera.plankTimeRemaining))
         }
-        return "\(camera.repCount) / \(currentStep.targetAmount)"
+        return "\(camera.repCount)"
+    }
+
+    private var currentStepDurationText: String? {
+        guard let currentStep, currentStep.mode.isTimed else { return nil }
+        return currentStep.targetText(language)
     }
 
     private var reviewView: some View {
@@ -599,15 +635,20 @@ private struct RecognitionDebugContributionView: View {
                     Button {
                         saveReviewAndContinue()
                     } label: {
-                        Label(currentStepIndex + 1 >= steps.count ? (language == .russian ? "Завершить" : "Finish") : (language == .russian ? "Далее" : "Next"), systemImage: "arrow.right")
+                        Label(
+                            reviewCompletionAction == .finish
+                                ? (language == .russian ? "Завершить тест" : "Finish test")
+                                : (language == .russian ? "Следующее упражнение" : "Next exercise"),
+                            systemImage: reviewCompletionAction == .finish ? "flag.checkered" : "arrow.right"
+                        )
                             .frame(minWidth: 160)
                     }
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .primary))
 
                     Button {
-                        finishSession()
+                        finishSession(saveCurrentReview: true)
                     } label: {
-                        Text(language == .russian ? "Остановить тест" : "Stop Test")
+                        Text(language == .russian ? "Завершить тест" : "Finish test")
                             .frame(minWidth: 150)
                     }
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .danger))
@@ -663,6 +704,8 @@ private struct RecognitionDebugContributionView: View {
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
                 Button(language == .russian ? "Скопировать контакты разработчика" : "Copy Developer Contacts") { copyDeveloperContacts() }
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
+                Button(language == .russian ? "Начать заново" : "Start again") { restartFlow() }
+                    .buttonStyle(RecognitionDebugButtonStyle(kind: .secondary))
                 Button(language == .russian ? "Готово" : "Done") { onDone() }
                     .buttonStyle(RecognitionDebugButtonStyle(kind: .primary))
             }
@@ -702,16 +745,13 @@ private struct RecognitionDebugContributionView: View {
         camera.setExperimentalExercisesVisible(true)
         camera.setSkeletonOverlayVisible(true)
         camera.onRecognitionDebugPoseUpdate = { _, update in
-            guard let currentStep else { return }
+            guard let currentStep, currentStepStarted else { return }
             recorder.record(camera: camera, update: update, step: currentStep, stepIndex: currentStepIndex)
         }
         camera.onRecognitionDebugVideoSampleBuffer = { sampleBuffer in
-            recorder.appendVideoSampleBuffer(sampleBuffer)
+            recorder.processSampleBuffer(sampleBuffer)
         }
-        camera.onRecognitionDebugStepCompleted = {
-            guard phase == .exercise else { return }
-            presentReview(manual: false, skipped: false)
-        }
+        camera.onRecognitionDebugStepCompleted = nil
 
         Task {
             await camera.start()
@@ -722,6 +762,9 @@ private struct RecognitionDebugContributionView: View {
         guard canStartSession else { return }
         recorder.start(language: language, recordVideo: shouldRecordVideo)
         reviews = []
+        exportURL = nil
+        exportErrorMessage = nil
+        exportStatusMessage = nil
         phase = .exercise
         currentStepIndex = 0
         currentStepStarted = false
@@ -734,18 +777,38 @@ private struct RecognitionDebugContributionView: View {
         recorder.markStepStarted(currentStep, stepIndex: currentStepIndex)
     }
 
-    private func presentReview(manual: Bool, skipped: Bool) {
+    private func presentReview(manual: Bool, skipped: Bool, completionAction: ReviewCompletionAction) {
         reviewWasManual = manual
         reviewWasSkipped = skipped
+        reviewCompletionAction = completionAction
         performanceRating = skipped ? 3 : 4
         recognitionRating = skipped ? .no : .partly
         reviewComment = ""
         cameraPlacement = reviews.last?.cameraPlacement ?? .defaultPlacement
         camera.stopRecognitionDebugSession()
+        recorder.finishCurrentStepRecording()
         phase = .review
     }
 
     private func saveReviewAndContinue() {
+        appendCurrentReview()
+
+        switch reviewCompletionAction {
+        case .advance:
+            guard currentStepIndex + 1 < steps.count else {
+                finishSession(saveCurrentReview: false)
+                return
+            }
+
+            currentStepIndex += 1
+            currentStepStarted = false
+            phase = .exercise
+        case .finish:
+            finishSession(saveCurrentReview: false)
+        }
+    }
+
+    private func appendCurrentReview() {
         reviews.append(
             RecognitionDebugExerciseReview(
                 exerciseMode: currentStep?.mode.rawValue ?? ExerciseMode.pushUps.rawValue,
@@ -762,19 +825,15 @@ private struct RecognitionDebugContributionView: View {
                 cameraPlacement: cameraPlacement
             )
         )
-
-        guard currentStepIndex + 1 < steps.count else {
-            finishSession()
-            return
-        }
-
-        currentStepIndex += 1
-        currentStepStarted = false
-        phase = .exercise
     }
 
-    private func finishSession() {
+    private func finishSession(saveCurrentReview: Bool = false) {
+        if saveCurrentReview, phase == .review {
+            appendCurrentReview()
+        }
         camera.stopRecognitionDebugSession()
+        recorder.finishCurrentStepRecording()
+        currentStepStarted = false
         do {
             exportURL = try recorder.writeFinalZip(
                 reviews: reviews,
@@ -789,6 +848,72 @@ private struct RecognitionDebugContributionView: View {
             exportStatusMessage = language == .russian ? "Ошибка экспорта" : "Export failed"
             phase = .summary
         }
+    }
+
+    private func handleNextExerciseTapped() {
+        guard currentStepStarted else {
+            guard currentStepIndex + 1 < steps.count else {
+                finishSession()
+                return
+            }
+            currentStepIndex += 1
+            currentStepStarted = false
+            return
+        }
+
+        presentReview(manual: true, skipped: false, completionAction: .advance)
+    }
+
+    private func finishCurrentExerciseTapped() {
+        guard currentStepStarted else { return }
+        presentReview(manual: true, skipped: false, completionAction: .advance)
+    }
+
+    private func handleSkipTapped() {
+        guard currentStepStarted else {
+            guard currentStepIndex + 1 < steps.count else {
+                finishSession()
+                return
+            }
+            currentStepIndex += 1
+            currentStepStarted = false
+            return
+        }
+
+        presentReview(manual: true, skipped: true, completionAction: .advance)
+    }
+
+    private func handleFinishTestTapped() {
+        guard currentStepStarted else {
+            finishSession()
+            return
+        }
+
+        presentReview(manual: true, skipped: false, completionAction: .finish)
+    }
+
+    private func resetCurrentExerciseTapped() {
+        camera.stopRecognitionDebugSession()
+        recorder.restartCurrentSession(language: language, recordVideo: shouldRecordVideo)
+        currentStepStarted = false
+    }
+
+    private func restartFlow() {
+        phase = .intro
+        currentStepIndex = 0
+        currentStepStarted = false
+        reviews = []
+        performanceRating = 4
+        recognitionRating = .partly
+        reviewComment = ""
+        reviewWasManual = false
+        reviewWasSkipped = false
+        reviewCompletionAction = .advance
+        exportErrorMessage = nil
+        exportStatusMessage = nil
+        cameraPlacement = .defaultPlacement
+        camera.stopRecognitionDebugSession()
+        recorder.cancel()
     }
 
     private func saveDebugFile() {
@@ -914,9 +1039,9 @@ private extension RecognitionDebugContributionView {
 private extension ExerciseMode {
     var isRecognitionDebugExperimental: Bool {
         switch self {
-        case .tuckPlancheHold, .lSitHold, .elbowLeverHold, .pikePushUps:
+        case .mountainClimbers, .tuckPlancheHold, .lSitHold, .elbowLeverHold, .pikePushUps:
             return true
-        case .pushUps, .squats, .abs, .plank, .burpees, .mountainClimbers:
+        case .pushUps, .squats, .abs, .plank, .burpees:
             return false
         }
     }
@@ -1197,6 +1322,7 @@ private final class RecognitionDebugRecorder: ObservableObject {
     private var lastSampleDate = Date.distantPast
     private var frameIndex = 0
     private var stepStarts: [RecognitionDebugStepStart] = []
+    private var currentStepRecording: RecognitionDebugStepRecording?
     private var sessionFolderURL: URL?
     private var poseSamplesURL: URL?
     private var poseSamplesHandle: FileHandle?
@@ -1205,6 +1331,7 @@ private final class RecognitionDebugRecorder: ObservableObject {
     private var isActive = false
     private var language: AppLanguage
     private let videoRecorder = RecognitionDebugVideoRecorder()
+    private let brightnessSampler = RecognitionDebugBrightnessSampler()
 
     init(language: AppLanguage) {
         self.language = language
@@ -1221,6 +1348,7 @@ private final class RecognitionDebugRecorder: ObservableObject {
         lastSampleDate = .distantPast
         frameIndex = 0
         stepStarts = []
+        currentStepRecording = nil
         lastCameraSnapshot = nil
         lastWrittenURL = nil
         sampleCount = 0
@@ -1229,6 +1357,7 @@ private final class RecognitionDebugRecorder: ObservableObject {
         videoDurationSeconds = 0
         videoError = nil
         isActive = true
+        brightnessSampler.reset()
 
         do {
             let folder = try Self.makeSessionFolder(sessionID: sessionID)
@@ -1253,18 +1382,74 @@ private final class RecognitionDebugRecorder: ObservableObject {
         }
     }
 
-    nonisolated func appendVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    func restartCurrentSession(language: AppLanguage, recordVideo: Bool) {
+        cancel()
+        start(language: language, recordVideo: recordVideo)
+    }
+
+    nonisolated func processSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         videoRecorder.append(sampleBuffer)
+        brightnessSampler.append(sampleBuffer)
+    }
+
+    func finishCurrentStepRecording() {
+        currentStepRecording = nil
+    }
+
+    func resetCurrentStepRecording(stepIndex: Int) {
+        guard let activeStepRecording = currentStepRecording,
+              activeStepRecording.stepIndex == stepIndex,
+              let poseSamplesURL else {
+            return
+        }
+
+        do {
+            try poseSamplesHandle?.close()
+            let data = try Data(contentsOf: poseSamplesURL)
+            var retainedLines: [Data] = []
+            if !data.isEmpty {
+                data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true).forEach { line in
+                    guard let sample = try? JSONDecoder().decode(RecognitionDebugPoseSample.self, from: Data(line)),
+                          sample.stepIndex == stepIndex else {
+                        retainedLines.append(Data(line))
+                        return
+                    }
+                }
+            }
+
+            let rebuilt = retainedLines.reduce(into: Data()) { partialResult, line in
+                partialResult.append(line)
+                partialResult.append(Data("\n".utf8))
+            }
+            try rebuilt.write(to: poseSamplesURL, options: .atomic)
+            poseSamplesHandle = try FileHandle(forWritingTo: poseSamplesURL)
+            try poseSamplesHandle?.seekToEnd()
+            sampleCount = activeStepRecording.sampleCountAtStart
+            frameIndex = activeStepRecording.frameIndexAtStart
+            lastSampleDate = .distantPast
+            stepStarts.removeAll { $0.stepIndex == stepIndex }
+            currentStepRecording = nil
+        } catch {
+            isActive = false
+            closePoseSamplesHandle()
+        }
     }
 
     func cancel() {
         isActive = false
         closePoseSamplesHandle()
         videoRecorder.cancel()
+        brightnessSampler.reset()
+        currentStepRecording = nil
     }
 
     func markStepStarted(_ step: RecognitionDebugExerciseStep, stepIndex: Int) {
         guard isActive else { return }
+        currentStepRecording = RecognitionDebugStepRecording(
+            stepIndex: stepIndex,
+            sampleCountAtStart: sampleCount,
+            frameIndexAtStart: frameIndex
+        )
         stepStarts.append(
             RecognitionDebugStepStart(
                 timestamp: Date().timeIntervalSince(createdAt),
@@ -1290,6 +1475,7 @@ private final class RecognitionDebugRecorder: ObservableObject {
         let metrics = RecognitionDebugMetrics(points: update.posePoints, exerciseMode: step.mode)
         let cameraSourceMode = camera.selectedDeviceIsIPhone ? "continuity" : "mac"
         let previewSize = RecognitionDebugSize(width: Double(camera.previewVideoSize.width), height: Double(camera.previewVideoSize.height))
+        let brightnessSnapshot = brightnessSampler.snapshot()
         let sample = RecognitionDebugPoseSample(
             timestampSeconds: sessionTimeSeconds,
             videoTimeSeconds: videoRecorder.videoTimeSeconds(forSessionTime: sessionTimeSeconds),
@@ -1306,9 +1492,26 @@ private final class RecognitionDebugRecorder: ObservableObject {
             holdSeconds: step.mode.isTimed ? max(0, Int((camera.plankDuration - camera.plankTimeRemaining).rounded(.down))) : 0,
             cameraSourceMode: cameraSourceMode,
             selectedCameraName: camera.selectedCameraName,
+            averageBrightness: brightnessSnapshot?.averageBrightness,
+            brightnessLevel: brightnessSnapshot?.brightnessLevel.rawValue,
+            brightnessSampleMethod: brightnessSnapshot?.sampleMethod,
             previewVideoSize: previewSize,
             posePoints: posePoints,
             metrics: metrics,
+            pikeAttemptMetrics: update.pikeAttemptMetrics.map {
+                RecognitionDebugPikeAttemptMetrics(
+                    phase: $0.phase,
+                    bestSide: $0.bestSide,
+                    topElbowAngle: $0.topElbowAngle,
+                    bottomElbowAngle: $0.bottomElbowAngle,
+                    currentElbowAngle: $0.currentElbowAngle,
+                    elbowAngleDelta: $0.elbowAngleDelta,
+                    lastDownSeenTime: $0.lastDownSeenTime,
+                    lastTopSeenTime: $0.lastTopSeenTime,
+                    returnToTopDetected: $0.returnToTopDetected,
+                    countBlockedReason: $0.countBlockedReason
+                )
+            },
             decision: RecognitionDebugDecision(
                 isPoseValid: update.isStartingPoseDetected || update.workoutState == .plankActive || update.repCount > 0,
                 reason: update.debugState,
@@ -1357,9 +1560,10 @@ private final class RecognitionDebugRecorder: ObservableObject {
             try? FileManager.default.removeItem(at: sessionFolderURL.appendingPathComponent("video.mp4"))
         }
 
+        let brightnessSummary = brightnessSampler.summary()
         let endDate = endedAt ?? Date()
         let metadata = RecognitionDebugMetadata(
-            schemaVersion: 2,
+            schemaVersion: 3,
             appName: "BreakGateWorkout",
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
             buildNumber: Bundle.main.infoDictionary?["CFBundleVersion"] as? String,
@@ -1398,6 +1602,12 @@ private final class RecognitionDebugRecorder: ObservableObject {
             poseSampleCount: sampleCount,
             sampleIntervalSeconds: sampleInterval,
             sampleCap: maxSampleCount,
+            averageBrightness: brightnessSummary?.averageBrightness,
+            minBrightness: brightnessSummary?.minBrightness,
+            maxBrightness: brightnessSummary?.maxBrightness,
+            brightnessLevel: brightnessSummary?.brightnessLevel.rawValue,
+            brightnessSampleCount: brightnessSummary?.sampleCount ?? 0,
+            brightnessSampleMethod: brightnessSummary?.sampleMethod,
             privacyNote: videoRecorded
                 ? "Nothing was uploaded automatically. Audio was not recorded. Video was recorded only because the user explicitly enabled it."
                 : "Nothing was uploaded automatically. Video and audio were not recorded."
@@ -1833,6 +2043,165 @@ nonisolated private final class RecognitionDebugVideoRecorder: @unchecked Sendab
     }
 }
 
+nonisolated private final class RecognitionDebugBrightnessSampler: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "BreakGateWorkout.recognitionDebug.brightness", qos: .utility)
+    private let queueKey = DispatchSpecificKey<Bool>()
+    private let frameStride = 6
+    private let sampleMethod = "lumaPlaneGridStride8Every6Frames"
+
+    private var frameCounter = 0
+    private var latestBrightness: Double?
+    private var latestLevel: RecognitionDebugBrightnessLevel?
+    private var minBrightness: Double?
+    private var maxBrightness: Double?
+    private var brightnessTotal = 0.0
+    private var brightnessSamples = 0
+
+    init() {
+        queue.setSpecific(key: queueKey, value: true)
+    }
+
+    func reset() {
+        sync {
+            frameCounter = 0
+            latestBrightness = nil
+            latestLevel = nil
+            minBrightness = nil
+            maxBrightness = nil
+            brightnessTotal = 0
+            brightnessSamples = 0
+        }
+    }
+
+    func append(_ sampleBuffer: CMSampleBuffer) {
+        sync {
+            frameCounter += 1
+            guard frameCounter.isMultiple(of: frameStride) else { return }
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+                  let brightness = Self.sampleBrightness(from: pixelBuffer) else { return }
+
+            latestBrightness = brightness
+            latestLevel = Self.level(for: brightness)
+            minBrightness = min(minBrightness ?? brightness, brightness)
+            maxBrightness = max(maxBrightness ?? brightness, brightness)
+            brightnessTotal += brightness
+            brightnessSamples += 1
+        }
+    }
+
+    func snapshot() -> RecognitionDebugBrightnessSnapshot? {
+        sync {
+            guard let latestBrightness, let latestLevel else { return nil }
+            return RecognitionDebugBrightnessSnapshot(
+                averageBrightness: latestBrightness,
+                brightnessLevel: latestLevel,
+                sampleMethod: sampleMethod
+            )
+        }
+    }
+
+    func summary() -> RecognitionDebugBrightnessSummary? {
+        sync {
+            guard brightnessSamples > 0,
+                  let minBrightness,
+                  let maxBrightness else { return nil }
+            let average = brightnessTotal / Double(brightnessSamples)
+            return RecognitionDebugBrightnessSummary(
+                averageBrightness: average,
+                minBrightness: minBrightness,
+                maxBrightness: maxBrightness,
+                brightnessLevel: Self.level(for: average),
+                sampleCount: brightnessSamples,
+                sampleMethod: sampleMethod
+            )
+        }
+    }
+
+    private static func sampleBrightness(from pixelBuffer: CVPixelBuffer) -> Double? {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let planeCount = CVPixelBufferGetPlaneCount(pixelBuffer)
+        if planeCount > 0 {
+            guard let baseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else { return nil }
+            let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
+            let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
+            let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+            return sampleLuma(baseAddress: baseAddress, width: width, height: height, bytesPerRow: bytesPerRow)
+        }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        return sampleBGRA(baseAddress: baseAddress, width: width, height: height, bytesPerRow: bytesPerRow)
+    }
+
+    private static func sampleLuma(baseAddress: UnsafeMutableRawPointer, width: Int, height: Int, bytesPerRow: Int) -> Double? {
+        let rowStride = max(1, height / 8)
+        let colStride = max(1, width / 8)
+        let pointer = baseAddress.assumingMemoryBound(to: UInt8.self)
+        var total = 0.0
+        var count = 0
+
+        for row in stride(from: 0, to: height, by: rowStride) {
+            let rowPointer = pointer.advanced(by: row * bytesPerRow)
+            for col in stride(from: 0, to: width, by: colStride) {
+                total += Double(rowPointer[col]) / 255.0
+                count += 1
+            }
+        }
+
+        guard count > 0 else { return nil }
+        return total / Double(count)
+    }
+
+    private static func sampleBGRA(baseAddress: UnsafeMutableRawPointer, width: Int, height: Int, bytesPerRow: Int) -> Double? {
+        let rowStride = max(1, height / 8)
+        let colStride = max(1, width / 8)
+        let pointer = baseAddress.assumingMemoryBound(to: UInt8.self)
+        var total = 0.0
+        var count = 0
+
+        for row in stride(from: 0, to: height, by: rowStride) {
+            let rowPointer = pointer.advanced(by: row * bytesPerRow)
+            for col in stride(from: 0, to: width, by: colStride) {
+                let pixelOffset = col * 4
+                let blue = Double(rowPointer[pixelOffset]) / 255.0
+                let green = Double(rowPointer[pixelOffset + 1]) / 255.0
+                let red = Double(rowPointer[pixelOffset + 2]) / 255.0
+                total += (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+                count += 1
+            }
+        }
+
+        guard count > 0 else { return nil }
+        return total / Double(count)
+    }
+
+    private static func level(for brightness: Double) -> RecognitionDebugBrightnessLevel {
+        switch brightness {
+        case ..<0.16:
+            return .dark
+        case ..<0.30:
+            return .dim
+        case ..<0.58:
+            return .medium
+        case ..<0.82:
+            return .bright
+        default:
+            return .overexposed
+        }
+    }
+
+    private func sync<T>(_ work: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            return work()
+        }
+        return queue.sync(execute: work)
+    }
+}
+
 private struct RecognitionDebugMetrics: Codable {
     let leftElbowAngle: Double?
     let rightElbowAngle: Double?
@@ -1955,8 +2324,17 @@ private struct RecognitionDebugMetrics: Codable {
             return bilateral(.shoulder) + bilateral(.wrist) + bilateral(.hip) + bilateral(.knee) + bilateral(.ankle)
         case .tuckPlancheHold:
             return bilateral(.wrist) + bilateral(.elbow) + bilateral(.shoulder) + bilateral(.hip) + bilateral(.knee)
-        case .lSitHold, .elbowLeverHold, .pikePushUps:
+        case .lSitHold, .elbowLeverHold:
             return bilateral(.wrist) + bilateral(.elbow) + bilateral(.shoulder) + bilateral(.hip) + bilateral(.knee) + bilateral(.ankle)
+        case .pikePushUps:
+            return [
+                [.leftShoulder, .rightShoulder],
+                [.leftElbow, .rightElbow],
+                [.leftWrist, .rightWrist],
+                [.leftHip, .rightHip],
+                [.leftKnee, .rightKnee],
+                [.leftAnkle, .rightAnkle]
+            ]
         }
     }
 
@@ -2017,6 +2395,12 @@ private struct RecognitionDebugMetadata: Codable {
     let poseSampleCount: Int
     let sampleIntervalSeconds: TimeInterval
     let sampleCap: Int
+    let averageBrightness: Double?
+    let minBrightness: Double?
+    let maxBrightness: Double?
+    let brightnessLevel: String?
+    let brightnessSampleCount: Int
+    let brightnessSampleMethod: String?
     let privacyNote: String
 }
 
@@ -2043,10 +2427,50 @@ private struct RecognitionDebugPoseSample: Codable {
     let holdSeconds: Int
     let cameraSourceMode: String
     let selectedCameraName: String
+    let averageBrightness: Double?
+    let brightnessLevel: String?
+    let brightnessSampleMethod: String?
     let previewVideoSize: RecognitionDebugSize
     let posePoints: [String: RecognitionDebugJointPoint]
     let metrics: RecognitionDebugMetrics
+    let pikeAttemptMetrics: RecognitionDebugPikeAttemptMetrics?
     let decision: RecognitionDebugDecision
+}
+
+private struct RecognitionDebugPikeAttemptMetrics: Codable {
+    let phase: String
+    let bestSide: String?
+    let topElbowAngle: Double?
+    let bottomElbowAngle: Double?
+    let currentElbowAngle: Double?
+    let elbowAngleDelta: Double?
+    let lastDownSeenTime: Double?
+    let lastTopSeenTime: Double?
+    let returnToTopDetected: Bool
+    let countBlockedReason: String?
+}
+
+private enum RecognitionDebugBrightnessLevel: String, Codable {
+    case dark
+    case dim
+    case medium
+    case bright
+    case overexposed
+}
+
+private struct RecognitionDebugBrightnessSnapshot {
+    let averageBrightness: Double
+    let brightnessLevel: RecognitionDebugBrightnessLevel
+    let sampleMethod: String
+}
+
+private struct RecognitionDebugBrightnessSummary {
+    let averageBrightness: Double
+    let minBrightness: Double
+    let maxBrightness: Double
+    let brightnessLevel: RecognitionDebugBrightnessLevel
+    let sampleCount: Int
+    let sampleMethod: String
 }
 
 private struct RecognitionDebugSize: Codable {
@@ -2146,6 +2570,12 @@ private struct RecognitionDebugCameraSnapshot {
     let selectedCameraName: String
     let previewVideoSize: RecognitionDebugSize
     let captureResolution: RecognitionDebugSize
+}
+
+private struct RecognitionDebugStepRecording {
+    let stepIndex: Int
+    let sampleCountAtStart: Int
+    let frameIndexAtStart: Int
 }
 
 private struct RecognitionDebugVideoResult {

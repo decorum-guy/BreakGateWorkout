@@ -54,6 +54,8 @@ The report folder contains:
 - `segments.csv`
 - `suspicious-moments.csv`
 - `missed-candidates.csv`
+- `state-timeline.csv`
+- `state-transitions.csv`
 - `manual-labels-template.csv`
 - `failure-reasons.json`
 - `frames/`
